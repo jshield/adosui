@@ -42,6 +42,10 @@ const proxy = http.createServer((req, res) => {
       host: undefined,
       origin: undefined,
       referer: undefined,
+      // Strip accept-encoding so ADO returns plain JSON (not gzip).
+      // The proxy pipes the body as-is and drops Content-Encoding,
+      // which would cause the browser to receive compressed bytes it can't decode.
+      'accept-encoding': undefined,
     },
   };
 

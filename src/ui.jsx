@@ -8,9 +8,19 @@ function useLocalStorage(key, initial) {
       return stored ? JSON.parse(stored) : initial;
     } catch { return initial; }
   });
+  // Re-read from storage whenever the key changes (e.g. after profile loads and key is scoped)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      setValue(stored ? JSON.parse(stored) : initial);
+    } catch { setValue(initial); }
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = useCallback((v) => {
-    setValue(v);
-    try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
+    setValue(prev => {
+      const next = typeof v === "function" ? v(prev) : v;
+      try { localStorage.setItem(key, JSON.stringify(next)); } catch {}
+      return next;
+    });
   }, [key]);
   return [value, set];
 }
@@ -273,6 +283,56 @@ class ADOClient {
       const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/test/runs?api-version=7.1&$top=20&includeRunDetails=true`);
       return r.value || [];
     } catch { return []; }
+  }
+
+  async getProfile() {
+    return this._cachedFetch("profile", () =>
+      this._fetch(`https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.1`)
+    );
+  }
+
+  // ── Server-side persistence ──────────────────────────────────────────────
+
+  _patHash() {
+    // SHA-256 of the PAT, computed in the browser via SubtleCrypto
+    // Returns a promise resolving to a hex string
+    const enc = new TextEncoder().encode(this.pat);
+    return crypto.subtle.digest("SHA-256", enc).then(buf =>
+      Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("")
+    );
+  }
+
+  async loadCollections(profileId) {
+    if (!USE_PROXY) return null; // persistence requires the server
+    try {
+      const res = await fetch(`${PROXY}/collections`, {
+        method: "GET",
+        headers: {
+          "Authorization": this._auth,
+          "X-Profile-Id": profileId,
+        },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return Array.isArray(data.collections) ? data.collections : null;
+    } catch { return null; }
+  }
+
+  async saveCollections(profileId, collections) {
+    if (!USE_PROXY) return; // persistence requires the server
+    try {
+      const patHash = await this._patHash();
+      await fetch(`${PROXY}/collections`, {
+        method: "PUT",
+        headers: {
+          "Authorization": this._auth,
+          "Content-Type": "application/json",
+          "X-Profile-Id": profileId,
+          "X-Pat-Hash": patHash,
+        },
+        body: JSON.stringify({ collections }),
+      });
+    } catch { /* fire-and-forget — silent failure */ }
   }
 }
 
@@ -893,16 +953,27 @@ const pipelineStatus = r => {
   return { color: T.dim, label: r || "unknown" };
 };
 
-function ResourceDetail({ client, workItem, org, collections, onResourceToggle, onCreateNewCollection }) {
+function ResourceDetail({ client, workItem, org, collection, onResourceToggle }) {
   const [repos,     setRepos]     = useState(null);
   const [pipelines, setPipelines] = useState(null);
   const [prs,       setPrs]       = useState(null);
   const [tests,     setTests]     = useState(null);
   const [loading,   setLoading]   = useState(true);
-  const [activeDropdown, setActiveDropdown] = useState(null);
+  const [activeTab, setActiveTab] = useState("details");
+
+  const [selectedRepo, setSelectedRepo] = useState(null);
+  const [selectedPipeline, setSelectedPipeline] = useState(null);
+  const [selectedPR, setSelectedPR] = useState(null);
+  const [selectedTest, setSelectedTest] = useState(null);
+
+  const [repoSearch, setRepoSearch] = useState("");
+  const [pipelineSearch, setPipelineSearch] = useState("");
+  const [prSearch, setPRSearch] = useState("");
+  const [testSearch, setTestSearch] = useState("");
 
   useEffect(() => {
     setLoading(true); setRepos(null); setPipelines(null); setPrs(null); setTests(null);
+    setSelectedRepo(null); setSelectedPipeline(null); setSelectedPR(null); setSelectedTest(null);
     Promise.allSettled([
       client.getAllRepos(),
       client.getAllPipelines(),
@@ -922,20 +993,410 @@ function ResourceDetail({ client, workItem, org, collections, onResourceToggle, 
   const title = workItem.fields?.["System.Title"] || "Untitled";
   const areaPath = workItem.fields?.["System.AreaPath"]?.split("\\")[0] || "";
 
-  const getCollectionsContainingRepo = (repoId) => collections.filter(col => col.repoIds?.includes(repoId));
-  const getCollectionsContainingPipeline = (pipelineId) => collections.filter(col => col.pipelineIds?.includes(String(pipelineId)));
-  const getCollectionsContainingPR = (prId) => collections.filter(col => col.prIds?.includes(String(prId)));
+  const tabs = [
+    { id: "details", label: "Details" },
+    { id: "repos", label: "Repositories", count: repos?.length || 0 },
+    { id: "pipelines", label: "Pipelines", count: pipelines?.length || 0 },
+    { id: "prs", label: "Pull Requests", count: prs?.length || 0 },
+    { id: "tests", label: "Test Runs", count: tests?.length || 0 },
+  ];
 
-  const handleToggleCollection = (type, id, colId) => {
-    if (onResourceToggle) onResourceToggle(type, id, colId);
-    setActiveDropdown(null);
+  const isInCollection = (type, id) => {
+    if (!collection) return false;
+    if (type === "repo") return collection.repoIds?.includes(String(id));
+    if (type === "pipeline") return collection.pipelineIds?.includes(String(id));
+    if (type === "pr") return collection.prIds?.includes(String(id));
+    return false;
+  };
+
+  const handleToggle = (type, id) => {
+    if (!collection || !onResourceToggle) return;
+    onResourceToggle(type, id, collection.id);
+  };
+
+  const renderToggleButton = (type, id) => {
+    const inCollection = isInCollection(type, id);
+    return (
+      <button onClick={() => handleToggle(type, id)}
+        title={inCollection ? "Remove from collection" : "Add to collection"}
+        style={{ background: inCollection ? `${collection.color}18` : "rgba(255,255,255,0.04)", border: `1px solid ${inCollection ? collection.color + "44" : "rgba(255,255,255,0.08)"}`, borderRadius: 4, padding: "6px 14px", cursor: "pointer", color: inCollection ? collection.color : T.muted, fontSize: 12, fontFamily: "'Barlow'", fontWeight: 500 }}>
+        {inCollection ? "✓ In Collection" : "+ Add to Collection"}
+      </button>
+    );
+  };
+
+  const renderDetailsTab = () => (
+    <div style={{ padding: "20px 24px" }}>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7, flexWrap: "wrap" }}>
+          <Pill label={WI_TYPE_SHORT[type] || type} color={WI_TYPE_COLOR[type] || T.dim} />
+          <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>#{workItem.id}</span>
+          <Pill label={state} color={stateColor(state)} />
+          {areaPath && <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>↳ {areaPath}</span>}
+        </div>
+        <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: "#F9FAFB", lineHeight: 1.2, letterSpacing: "0.02em", marginBottom: 8 }}>{title}</div>
+        {workItem.fields?.["System.AssignedTo"]?.displayName && (
+          <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
+            Assigned to {workItem.fields["System.AssignedTo"].displayName} · Changed {timeAgo(workItem.fields["System.ChangedDate"])}
+          </div>
+        )}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+        <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Fields</div>
+        {Object.entries(workItem.fields || {}).filter(([k]) => !["System.TeamProject", "System.Rev", "System.AuthorizedAs", "System.StateChangedDate", "System.Watermark", "System.IsDeleted", "System.AcceleratedCardData"].includes(k)).map(([key, value]) => {
+          let displayValue = "";
+          if (value === null || value === undefined) {
+            displayValue = "—";
+          } else if (typeof value === "object") {
+            if (value.displayName) displayValue = value.displayName;
+            else if (value.name) displayValue = value.name;
+            else displayValue = JSON.stringify(value).slice(0, 50);
+          } else {
+            displayValue = String(value);
+          }
+          const fieldName = key.replace("System.", "").replace("Microsoft.VSTS.", "").replace("SFCC.", "");
+          if (displayValue === "" || displayValue === "undefined") return null;
+          return (
+            <div key={key} style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+              <span style={{ width: 140, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>{fieldName}</span>
+              <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'", wordBreak: "break-word" }}>{displayValue}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderReposTab = () => {
+    const filteredRepos = (repos || []).filter(r => 
+      !repoSearch || r.name?.toLowerCase().includes(repoSearch.toLowerCase())
+    );
+
+    return (
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* List Pane */}
+        <div style={{ width: "45%", borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: 12, borderBottom: `1px solid ${T.border}` }}>
+            <input value={repoSearch} onChange={e => setRepoSearch(e.target.value)} placeholder="Search repositories..."
+              style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 5, outline: "none", color: T.text, padding: "8px 12px", fontSize: 12, fontFamily: "'Barlow'", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {loading ? (
+              <div style={{ padding: 20, display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading...</div>
+            ) : filteredRepos.length ? (
+              filteredRepos.slice(0, 20).map(r => {
+                const isSel = selectedRepo?.id === r.id;
+                const inCollection = isInCollection("repo", r.id);
+                return (
+                  <div key={r.id} onClick={() => setSelectedRepo(r)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", borderLeft: `2px solid ${isSel ? T.cyan : "transparent"}`, background: isSel ? `${T.cyan}08` : "transparent", transition: "all 0.12s" }}
+                    onMouseEnter={e => { if (!isSel) { e.currentTarget.style.background = "rgba(255,255,255,0.025)"; } }}
+                    onMouseLeave={e => { if (!isSel) { e.currentTarget.style.background = "transparent"; } }}>
+                    <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", color: inCollection ? collection?.color : T.cyan }}>{r.name}</span>
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ padding: 20, color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No repositories</div>
+            )}
+          </div>
+        </div>
+
+        {/* Detail Pane */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+          {selectedRepo ? (
+            <>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: "#F9FAFB", marginBottom: 8 }}>{selectedRepo.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  {renderToggleButton("repo", selectedRepo.id)}
+                </div>
+              </div>
+              <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+                <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Details</div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Default Branch</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedRepo.defaultBranch?.replace("refs/heads/", "") || "main"}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Size</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedRepo.size ? `${(selectedRepo.size / 1024).toFixed(0)} KB` : "empty"}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>URL</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'", wordBreak: "break-all", fontSize: 11 }}>{selectedRepo.remoteUrl || "—"}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Last Updated</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{timeAgo(selectedRepo.lastUpdatedTime)}</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontSize: 13, fontFamily: "'Barlow'" }}>
+              Select a repository to view details
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderPipelinesTab = () => {
+    const filteredPipelines = (pipelines || []).filter(p => 
+      !pipelineSearch || p.name?.toLowerCase().includes(pipelineSearch.toLowerCase())
+    );
+
+    return (
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* List Pane */}
+        <div style={{ width: "45%", borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: 12, borderBottom: `1px solid ${T.border}` }}>
+            <input value={pipelineSearch} onChange={e => setPipelineSearch(e.target.value)} placeholder="Search pipelines..."
+              style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 5, outline: "none", color: T.text, padding: "8px 12px", fontSize: 12, fontFamily: "'Barlow'", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {loading ? (
+              <div style={{ padding: 20, display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading...</div>
+            ) : filteredPipelines.length ? (
+              filteredPipelines.slice(0, 20).map(p => {
+                const rs = pipelineStatus(p.latestRun?.result || p.latestRun?.state);
+                const isSel = selectedPipeline?.id === p.id;
+                const inCollection = isInCollection("pipeline", p.id);
+                return (
+                  <div key={p.id} onClick={() => setSelectedPipeline(p)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", borderLeft: `2px solid ${isSel ? rs.color : "transparent"}`, background: isSel ? `${rs.color}08` : "transparent", transition: "all 0.12s" }}
+                    onMouseEnter={e => { if (!isSel) { e.currentTarget.style.background = "rgba(255,255,255,0.025)"; } }}
+                    onMouseLeave={e => { if (!isSel) { e.currentTarget.style.background = "transparent"; } }}>
+                    <Dot color={rs.color} pulse={rs.label === "running"} />
+                    <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", color: inCollection ? collection?.color : T.text }}>{p.name}</span>
+                    <Pill label={rs.label} color={rs.color} />
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ padding: 20, color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No pipelines</div>
+            )}
+          </div>
+        </div>
+
+        {/* Detail Pane */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+          {selectedPipeline ? (
+            <>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: "#F9FAFB", marginBottom: 8 }}>{selectedPipeline.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  {renderToggleButton("pipeline", selectedPipeline.id)}
+                </div>
+              </div>
+              <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+                <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Details</div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Folder</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedPipeline.folder || "/"}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Last Run</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>
+                    <Pill label={pipelineStatus(selectedPipeline.latestRun?.result || selectedPipeline.latestRun?.state).label} color={pipelineStatus(selectedPipeline.latestRun?.result || selectedPipeline.latestRun?.state).color} />
+                    <span style={{ marginLeft: 8 }}>{timeAgo(selectedPipeline.latestRun?.startTime)}</span>
+                  </span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Definition ID</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedPipeline.id}</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontSize: 13, fontFamily: "'Barlow'" }}>
+              Select a pipeline to view details
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderPRsTab = () => {
+    const filteredPRs = (prs || []).filter(pr => 
+      !prSearch || pr.title?.toLowerCase().includes(prSearch.toLowerCase()) || String(pr.pullRequestId).includes(prSearch)
+    );
+
+    return (
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* List Pane */}
+        <div style={{ width: "45%", borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: 12, borderBottom: `1px solid ${T.border}` }}>
+            <input value={prSearch} onChange={e => setPRSearch(e.target.value)} placeholder="Search pull requests..."
+              style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 5, outline: "none", color: T.text, padding: "8px 12px", fontSize: 12, fontFamily: "'Barlow'", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {loading ? (
+              <div style={{ padding: 20, display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading...</div>
+            ) : filteredPRs.length ? (
+              filteredPRs.slice(0, 20).map(pr => {
+                const ps = { active: { color: T.cyan, label: "open" }, completed: { color: T.green, label: "merged" }, abandoned: { color: T.muted, label: "closed" } }[pr.status] || { color: T.dim, label: pr.status };
+                const isSel = selectedPR?.pullRequestId === pr.pullRequestId;
+                const inCollection = isInCollection("pr", pr.pullRequestId);
+                return (
+                  <div key={pr.pullRequestId} onClick={() => setSelectedPR(pr)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", borderLeft: `2px solid ${isSel ? ps.color : "transparent"}`, background: isSel ? `${ps.color}08` : "transparent", transition: "all 0.12s" }}
+                    onMouseEnter={e => { if (!isSel) { e.currentTarget.style.background = "rgba(255,255,255,0.025)"; } }}
+                    onMouseLeave={e => { if (!isSel) { e.currentTarget.style.background = "transparent"; } }}>
+                    <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", width: 30 }}>#{pr.pullRequestId}</span>
+                    <span style={{ flex: 1, fontSize: 12, color: inCollection ? collection?.color : T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pr.title}</span>
+                    <Pill label={ps.label} color={ps.color} />
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ padding: 20, color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No pull requests</div>
+            )}
+          </div>
+        </div>
+
+        {/* Detail Pane */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+          {selectedPR ? (
+            <>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: "#F9FAFB", marginBottom: 8 }}>{selectedPR.title}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <Pill label={{ active: "open", completed: "merged", abandoned: "closed" }[selectedPR.status] || selectedPR.status} color={{ active: T.cyan, completed: T.green, abandoned: T.muted }[selectedPR.status] || T.dim} />
+                  {renderToggleButton("pr", selectedPR.pullRequestId)}
+                </div>
+              </div>
+              <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+                <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Details</div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Author</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedPR.createdBy?.displayName || "—"}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Source</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedPR.sourceRefName?.replace("refs/heads/", "") || "—"}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Target</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedPR.targetRefName?.replace("refs/heads/", "") || "—"}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Created</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{timeAgo(selectedPR.creationDate)}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Reviewers</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedPR.reviewers?.length || 0}</span>
+                </div>
+                {selectedPR.description && (
+                  <div style={{ padding: "6px 0", fontSize: 12 }}>
+                    <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11, display: "block", marginBottom: 4 }}>Description</span>
+                    <div style={{ color: T.text, fontFamily: "'JetBrains Mono'", fontSize: 11, whiteSpace: "pre-wrap", background: "rgba(255,255,255,0.03)", padding: 10, borderRadius: 4 }}>{selectedPR.description}</div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontSize: 13, fontFamily: "'Barlow'" }}>
+              Select a pull request to view details
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTestsTab = () => {
+    const filteredTests = (tests || []).filter(t => 
+      !testSearch || t.name?.toLowerCase().includes(testSearch.toLowerCase())
+    );
+
+    return (
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* List Pane */}
+        <div style={{ width: "45%", borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: 12, borderBottom: `1px solid ${T.border}` }}>
+            <input value={testSearch} onChange={e => setTestSearch(e.target.value)} placeholder="Search test runs..."
+              style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 5, outline: "none", color: T.text, padding: "8px 12px", fontSize: 12, fontFamily: "'Barlow'", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {loading ? (
+              <div style={{ padding: 20, display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading...</div>
+            ) : filteredTests.length ? (
+              filteredTests.slice(0, 20).map(t => {
+                const pass = t.passedTests ?? 0;
+                const fail = t.failedTests ?? 0;
+                const color = fail > 0 ? T.red : pass > 0 ? T.green : T.dim;
+                const isSel = selectedTest?.id === t.id;
+                return (
+                  <div key={t.id} onClick={() => setSelectedTest(t)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", borderLeft: `2px solid ${isSel ? color : "transparent"}`, background: isSel ? `${color}08` : "transparent", transition: "all 0.12s" }}
+                    onMouseEnter={e => { if (!isSel) { e.currentTarget.style.background = "rgba(255,255,255,0.025)"; } }}
+                    onMouseLeave={e => { if (!isSel) { e.currentTarget.style.background = "transparent"; } }}>
+                    <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", flex: 1, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
+                    <span style={{ fontSize: 10, color: T.green, fontFamily: "'JetBrains Mono'" }}>✓ {pass}</span>
+                    {fail > 0 && <span style={{ fontSize: 10, color: T.red, fontFamily: "'JetBrains Mono'" }}>✗ {fail}</span>}
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ padding: 20, color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No test runs</div>
+            )}
+          </div>
+        </div>
+
+        {/* Detail Pane */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+          {selectedTest ? (
+            <>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: "#F9FAFB", marginBottom: 8 }}>{selectedTest.name}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <Pill label={selectedTest.failedTests > 0 ? "failing" : "passing"} color={selectedTest.failedTests > 0 ? T.red : T.green} />
+                </div>
+              </div>
+              <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+                <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Results</div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Passed</span>
+                  <span style={{ flex: 1, color: T.green, fontFamily: "'JetBrains Mono'" }}>{selectedTest.passedTests ?? 0}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Failed</span>
+                  <span style={{ flex: 1, color: T.red, fontFamily: "'JetBrains Mono'" }}>{selectedTest.failedTests ?? 0}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Total</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{(selectedTest.passedTests ?? 0) + (selectedTest.failedTests ?? 0)}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Completed</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{timeAgo(selectedTest.completedDate)}</span>
+                </div>
+                <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Run ID</span>
+                  <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{selectedTest.id}</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontSize: 13, fontFamily: "'Barlow'" }}>
+              Select a test run to view details
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       {/* Header */}
-      <div style={{ padding: "18px 24px 16px", borderBottom: `1px solid ${T.border}`, background: T.panel, flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+      <div style={{ padding: "18px 24px 16px", borderBottom: `1px solid ${T.border}`, background: T.panel }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7, flexWrap: "wrap" }}>
               <Pill label={WI_TYPE_SHORT[type] || type} color={WI_TYPE_COLOR[type] || T.dim} />
@@ -944,11 +1405,6 @@ function ResourceDetail({ client, workItem, org, collections, onResourceToggle, 
               {areaPath && <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>↳ {areaPath}</span>}
             </div>
             <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: "#F9FAFB", lineHeight: 1.2, letterSpacing: "0.02em" }}>{title}</div>
-            {workItem.fields?.["System.AssignedTo"]?.displayName && (
-              <div style={{ marginTop: 5, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
-                Assigned to {workItem.fields["System.AssignedTo"].displayName} · Changed {timeAgo(workItem.fields["System.ChangedDate"])}
-              </div>
-            )}
           </div>
           <a href={`https://dev.azure.com/${encodeURIComponent(org)}/_workitems/edit/${workItem.id}`}
             target="_blank" rel="noreferrer"
@@ -958,178 +1414,33 @@ function ResourceDetail({ client, workItem, org, collections, onResourceToggle, 
         </div>
       </div>
 
-      {/* Resources */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-        {loading
-          ? <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading resources…</div>
-          : <>
-              <Section title="Repositories" icon="⎇" count={repos?.length}>
-                {repos?.length
-                  ? repos.slice(0, 10).map(r => {
-                      const containingCols = getCollectionsContainingRepo(r.id);
-                      return (
-                        <Card key={r.id} accent={T.cyan}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <div style={{ display: "flex", gap: 3 }}>
-                                {containingCols.map(col => (
-                                  <span key={col.id} style={{ width: 5, height: 5, borderRadius: "50%", background: col.color }} title={col.name} />
-                                ))}
-                              </div>
-                              <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.cyan }}>{r.name}</span>
-                              <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>/{r.defaultBranch?.replace("refs/heads/", "") || "main"}</span>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span style={{ fontSize: 10, color: T.green, background: `${T.green}10`, padding: "2px 7px", borderRadius: 3, fontFamily: "'JetBrains Mono'" }}>
-                                {r.size ? `${(r.size / 1024).toFixed(0)} KB` : "empty"}
-                              </span>
-                              <div style={{ position: "relative" }}>
-                                <button onClick={() => setActiveDropdown(activeDropdown === `repo-${r.id}` ? null : `repo-${r.id}`)}
-                                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "3px 8px", cursor: "pointer", color: T.muted, fontSize: 12 }}>
-                                  +
-                                </button>
-                                {activeDropdown === `repo-${r.id}` && (
-                                  <CollectionDropdown
-                                    collections={collections}
-                                    currentIds={containingCols.map(c => c.id)}
-                                    onToggle={(colId) => handleToggleCollection("repo", r.id, colId)}
-                                    onClose={() => setActiveDropdown(null)}
-                                    onCreateNew={onCreateNewCollection}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })
-                  : <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No repositories</div>
-                }
-              </Section>
-
-              <Section title="Pipelines" icon="⚡" count={pipelines?.length}>
-                {pipelines?.length
-                  ? pipelines.slice(0, 10).map(p => {
-                      const rs = pipelineStatus(p.latestRun?.result || p.latestRun?.state);
-                      const containingCols = getCollectionsContainingPipeline(p.id);
-                      return (
-                        <Card key={p.id} accent={rs.color}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                              <div style={{ display: "flex", gap: 3 }}>
-                                {containingCols.map(col => (
-                                  <span key={col.id} style={{ width: 5, height: 5, borderRadius: "50%", background: col.color }} title={col.name} />
-                                ))}
-                              </div>
-                              <Dot color={rs.color} pulse={rs.label === "running"} />
-                              <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.text }}>{p.name}</span>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <Pill label={rs.label} color={rs.color} />
-                              <div style={{ position: "relative" }}>
-                                <button onClick={() => setActiveDropdown(activeDropdown === `pipeline-${p.id}` ? null : `pipeline-${p.id}`)}
-                                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "3px 8px", cursor: "pointer", color: T.muted, fontSize: 12 }}>
-                                  +
-                                </button>
-                                {activeDropdown === `pipeline-${p.id}` && (
-                                  <CollectionDropdown
-                                    collections={collections}
-                                    currentIds={containingCols.map(c => c.id)}
-                                    onToggle={(colId) => handleToggleCollection("pipeline", p.id, colId)}
-                                    onClose={() => setActiveDropdown(null)}
-                                    onCreateNew={onCreateNewCollection}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })
-                  : <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No pipelines</div>
-                }
-              </Section>
-
-              <Section title="Pull Requests" icon="⟲" count={prs?.length}>
-                {prs?.length
-                  ? prs.slice(0, 8).map(pr => {
-                      const ps = { active: { color: T.cyan, label: "open" }, completed: { color: T.green, label: "merged" }, abandoned: { color: T.muted, label: "closed" } }[pr.status] || { color: T.dim, label: pr.status };
-                      const containingCols = getCollectionsContainingPR(pr.pullRequestId);
-                      return (
-                        <Card key={pr.pullRequestId} accent={ps.color}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                            <div style={{ flex: 1, paddingRight: 12 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <div style={{ display: "flex", gap: 3 }}>
-                                  {containingCols.map(col => (
-                                    <span key={col.id} style={{ width: 5, height: 5, borderRadius: "50%", background: col.color }} title={col.name} />
-                                  ))}
-                                </div>
-                                <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>#{pr.pullRequestId} </span>
-                                <span style={{ fontSize: 13, color: T.text }}>{pr.title}</span>
-                              </div>
-                              <div style={{ marginTop: 5, display: "flex", gap: 12, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
-                                <span>{pr.createdBy?.displayName}</span>
-                                <span>→ {pr.targetRefName?.replace("refs/heads/", "")}</span>
-                                <span>{timeAgo(pr.creationDate)}</span>
-                                <span>{pr.reviewers?.length || 0} reviewer{pr.reviewers?.length !== 1 ? "s" : ""}</span>
-                              </div>
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <Pill label={ps.label} color={ps.color} />
-                              <div style={{ position: "relative" }}>
-                                <button onClick={() => setActiveDropdown(activeDropdown === `pr-${pr.pullRequestId}` ? null : `pr-${pr.pullRequestId}`)}
-                                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "3px 8px", cursor: "pointer", color: T.muted, fontSize: 12 }}>
-                                  +
-                                </button>
-                                {activeDropdown === `pr-${pr.pullRequestId}` && (
-                                  <CollectionDropdown
-                                    collections={collections}
-                                    currentIds={containingCols.map(c => c.id)}
-                                    onToggle={(colId) => handleToggleCollection("pr", pr.pullRequestId, colId)}
-                                    onClose={() => setActiveDropdown(null)}
-                                    onCreateNew={onCreateNewCollection}
-                                  />
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })
-                  : <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No active pull requests</div>
-                }
-              </Section>
-
-              <Section title="Test Runs" icon="✓" count={tests?.length}>
-                {tests?.length
-                  ? tests.slice(0, 8).map(t => {
-                      const pass = t.passedTests ?? 0;
-                      const fail = t.failedTests ?? 0;
-                      const total = t.totalTests ?? pass + fail;
-                      const color = fail > 0 ? T.red : pass > 0 ? T.green : T.dim;
-                      return (
-                        <Card key={t.id} accent={color}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <div>
-                              <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", color: T.text }}>{t.name}</span>
-                              <div style={{ marginTop: 3, fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>{timeAgo(t.completedDate)}</div>
-                            </div>
-                            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                              <span style={{ fontSize: 11, color: T.green, fontFamily: "'JetBrains Mono'" }}>✓ {pass}</span>
-                              {fail > 0 && <span style={{ fontSize: 11, color: T.red, fontFamily: "'JetBrains Mono'" }}>✗ {fail}</span>}
-                              <Pill label={fail > 0 ? "failing" : "passing"} color={color} />
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })
-                  : <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No test runs</div>
-                }
-              </Section>
-            </>
-        }
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.border}`, padding: "0 24px", background: T.panel }}>
+        {tabs.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            style={{
+              background: "transparent",
+              border: "none",
+              borderBottom: `2px solid ${activeTab === tab.id ? T.amber : "transparent"}`,
+              color: activeTab === tab.id ? T.text : T.dim,
+              padding: "10px 16px",
+              fontSize: 12,
+              fontFamily: "'Barlow'",
+              fontWeight: 500,
+              cursor: "pointer",
+              marginBottom: -1,
+            }}>
+            {tab.label} {tab.count > 0 && <span style={{ opacity: 0.6 }}>({tab.count})</span>}
+          </button>
+        ))}
       </div>
+
+      {/* Tab Content */}
+      {activeTab === "details" && renderDetailsTab()}
+      {activeTab === "repos" && renderReposTab()}
+      {activeTab === "pipelines" && renderPipelinesTab()}
+      {activeTab === "prs" && renderPRsTab()}
+      {activeTab === "tests" && renderTestsTab()}
     </div>
   );
 }
@@ -1141,7 +1452,6 @@ function CollectionResources({ client, collection, collections, onWorkItemToggle
   const [pipelines, setPipelines] = useState([]);
   const [prs, setPrs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("workitems");
 
   useEffect(() => {
     setLoading(true);
@@ -1182,19 +1492,24 @@ function CollectionResources({ client, collection, collections, onWorkItemToggle
     fetchData();
   }, [collection.id, collection.workItemIds, collection.repoIds, collection.pipelineIds, collection.prIds]);
 
-  const tabs = [
-    { id: "workitems", label: "Work Items", count: collection.workItemIds?.length || 0 },
-    { id: "repos", label: "Repositories", count: collection.repoIds?.length || 0 },
-    { id: "pipelines", label: "Pipelines", count: collection.pipelineIds?.length || 0 },
-    { id: "prs", label: "Pull Requests", count: collection.prIds?.length || 0 },
-  ];
-
   const removeFromCollection = (type, id) => {
     if (type === "workitem") {
       onWorkItemToggle(collection.id, id);
     } else {
       onResourceToggle(type, id, collection.id);
     }
+  };
+
+  const renderGroup = (title, items, renderItem) => {
+    if (!items || items.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10, padding: "0 4px" }}>
+          {title} ({items.length})
+        </div>
+        {items.map(renderItem)}
+      </div>
+    );
   };
 
   return (
@@ -1210,26 +1525,6 @@ function CollectionResources({ client, collection, collections, onWorkItemToggle
           </div>
           <Dot color={collection.color} />
         </div>
-        
-        <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.border}`, paddingBottom: 0 }}>
-          {tabs.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              style={{
-                background: activeTab === tab.id ? `${collection.color}15` : "transparent",
-                border: "none",
-                borderBottom: `2px solid ${activeTab === tab.id ? collection.color : "transparent"}`,
-                color: activeTab === tab.id ? T.text : T.dim,
-                padding: "8px 16px",
-                fontSize: 12,
-                fontFamily: "'Barlow'",
-                fontWeight: 500,
-                cursor: "pointer",
-                marginBottom: -1,
-              }}>
-              {tab.label} {tab.count > 0 && <span style={{ opacity: 0.6 }}>({tab.count})</span>}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
@@ -1237,120 +1532,94 @@ function CollectionResources({ client, collection, collections, onWorkItemToggle
           <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading...</div>
         ) : (
           <>
-            {activeTab === "workitems" && (
-              <>
-                {workItems.length > 0 ? workItems.map(wi => {
-                  const type = wi.fields?.["System.WorkItemType"] || "Task";
-                  const state = wi.fields?.["System.State"] || "";
-                  return (
-                    <Card key={wi.id} accent={WI_TYPE_COLOR[type] || T.dim} style={{ marginBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                            <Pill label={WI_TYPE_SHORT[type] || type} color={WI_TYPE_COLOR[type] || T.dim} />
-                            <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>#{wi.id}</span>
-                            <Pill label={state} color={stateColor(state)} />
-                          </div>
-                          <div style={{ fontSize: 13, color: T.text }}>{wi.fields?.["System.Title"]}</div>
-                        </div>
-                        <button onClick={() => removeFromCollection("workitem", wi.id)}
-                          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12 }}>
-                          × Remove
-                        </button>
+            {renderGroup("Work Items", workItems, wi => {
+              const type = wi.fields?.["System.WorkItemType"] || "Task";
+              const state = wi.fields?.["System.State"] || "";
+              return (
+                <Card key={wi.id} accent={WI_TYPE_COLOR[type] || T.dim} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                        <Pill label={WI_TYPE_SHORT[type] || type} color={WI_TYPE_COLOR[type] || T.dim} />
+                        <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>#{wi.id}</span>
+                        <Pill label={state} color={stateColor(state)} />
                       </div>
-                    </Card>
-                  );
-                }) : (
-                  <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'", textAlign: "center", padding: 40 }}>
-                    No work items saved in this collection.<br />Click + on a work item to add it.
+                      <div style={{ fontSize: 13, color: T.text }}>{wi.fields?.["System.Title"]}</div>
+                    </div>
+                    <button onClick={() => removeFromCollection("workitem", wi.id)}
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12 }}>
+                      × Remove
+                    </button>
                   </div>
-                )}
-              </>
-            )}
+                </Card>
+              );
+            })}
 
-            {activeTab === "repos" && (
-              <>
-                {repos.length > 0 ? repos.map(r => (
-                  <Card key={r.id} accent={T.cyan} style={{ marginBottom: 8 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            {renderGroup("Repositories", repos, r => (
+              <Card key={r.id} accent={T.cyan} style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.cyan }}>{r.name}</span>
+                    <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginLeft: 8 }}>/{r.defaultBranch?.replace("refs/heads/", "") || "main"}</span>
+                  </div>
+                  <button onClick={() => removeFromCollection("repo", r.id)}
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12 }}>
+                    × Remove
+                  </button>
+                </div>
+              </Card>
+            ))}
+
+            {renderGroup("Pipelines", pipelines, p => {
+              const rs = pipelineStatus(p.latestRun?.result || p.latestRun?.state);
+              return (
+                <Card key={p.id} accent={rs.color} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Dot color={rs.color} pulse={rs.label === "running"} />
+                      <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.text }}>{p.name}</span>
+                      <Pill label={rs.label} color={rs.color} />
+                    </div>
+                    <button onClick={() => removeFromCollection("pipeline", p.id)}
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12 }}>
+                      × Remove
+                    </button>
+                  </div>
+                </Card>
+              );
+            })}
+
+            {renderGroup("Pull Requests", prs, pr => {
+              const ps = { active: { color: T.cyan, label: "open" }, completed: { color: T.green, label: "merged" }, abandoned: { color: T.muted, label: "closed" } }[pr.status] || { color: T.dim, label: pr.status };
+              return (
+                <Card key={pr.pullRequestId} accent={ps.color} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
                       <div>
-                        <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.cyan }}>{r.name}</span>
-                        <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginLeft: 8 }}>/{r.defaultBranch?.replace("refs/heads/", "") || "main"}</span>
+                        <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>#{pr.pullRequestId} </span>
+                        <span style={{ fontSize: 13, color: T.text }}>{pr.title}</span>
                       </div>
-                      <button onClick={() => removeFromCollection("repo", r.id)}
+                      <div style={{ marginTop: 4, display: "flex", gap: 12, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
+                        <span>{pr.createdBy?.displayName}</span>
+                        <span>→ {pr.targetRefName?.replace("refs/heads/", "")}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <Pill label={ps.label} color={ps.color} />
+                      <button onClick={() => removeFromCollection("pr", pr.pullRequestId)}
                         style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12 }}>
                         × Remove
                       </button>
                     </div>
-                  </Card>
-                )) : (
-                  <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'", textAlign: "center", padding: 40 }}>
-                    No repositories saved. Click + on a repo to add it.
                   </div>
-                )}
-              </>
-            )}
+                </Card>
+              );
+            })}
 
-            {activeTab === "pipelines" && (
-              <>
-                {pipelines.length > 0 ? pipelines.map(p => {
-                  const rs = pipelineStatus(p.latestRun?.result || p.latestRun?.state);
-                  return (
-                    <Card key={p.id} accent={rs.color} style={{ marginBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <Dot color={rs.color} pulse={rs.label === "running"} />
-                          <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.text }}>{p.name}</span>
-                          <Pill label={rs.label} color={rs.color} />
-                        </div>
-                        <button onClick={() => removeFromCollection("pipeline", p.id)}
-                          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12 }}>
-                          × Remove
-                        </button>
-                      </div>
-                    </Card>
-                  );
-                }) : (
-                  <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'", textAlign: "center", padding: 40 }}>
-                    No pipelines saved. Click + on a pipeline to add it.
-                  </div>
-                )}
-              </>
-            )}
-
-            {activeTab === "prs" && (
-              <>
-                {prs.length > 0 ? prs.map(pr => {
-                  const ps = { active: { color: T.cyan, label: "open" }, completed: { color: T.green, label: "merged" }, abandoned: { color: T.muted, label: "closed" } }[pr.status] || { color: T.dim, label: pr.status };
-                  return (
-                    <Card key={pr.pullRequestId} accent={ps.color} style={{ marginBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <div style={{ flex: 1 }}>
-                          <div>
-                            <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>#{pr.pullRequestId} </span>
-                            <span style={{ fontSize: 13, color: T.text }}>{pr.title}</span>
-                          </div>
-                          <div style={{ marginTop: 4, display: "flex", gap: 12, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
-                            <span>{pr.createdBy?.displayName}</span>
-                            <span>→ {pr.targetRefName?.replace("refs/heads/", "")}</span>
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <Pill label={ps.label} color={ps.color} />
-                          <button onClick={() => removeFromCollection("pr", pr.pullRequestId)}
-                            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12 }}>
-                            × Remove
-                          </button>
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                }) : (
-                  <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'", textAlign: "center", padding: 40 }}>
-                    No pull requests saved. Click + on a PR to add it.
-                  </div>
-                )}
-              </>
+            {workItems.length === 0 && repos.length === 0 && pipelines.length === 0 && prs.length === 0 && (
+              <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'", textAlign: "center", padding: 40 }}>
+                No items in this collection.<br />Search for resources to add them.
+              </div>
             )}
           </>
         )}
@@ -1359,17 +1628,364 @@ function CollectionResources({ client, collection, collections, onWorkItemToggle
   );
 }
 
+/* ─── SEARCH RESULTS LIST ────────────────────────────────────── */
+function SearchResultsList({ results, searching, searchQuery, collection, selectedResult, onSelect, onWorkItemToggle, onResourceToggle }) {
+  if (searching) {
+    return (
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: T.dim }}>
+        <div style={{ width: 22, height: 22, border: `2px solid ${T.border}`, borderTopColor: T.amber, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+        <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'" }}>Searching…</span>
+      </div>
+    );
+  }
+
+  if (!results) {
+    return (
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10, color: T.dim }}>
+        <span style={{ fontSize: 28 }}>🔍</span>
+        <span style={{ fontSize: 13, fontFamily: "'Barlow Condensed'", letterSpacing: "0.05em" }}>Type to search all resources</span>
+      </div>
+    );
+  }
+
+  const total = results.workItems.length + results.repos.length + results.pipelines.length + results.prs.length;
+  if (total === 0) {
+    return (
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10, color: T.dim }}>
+        <span style={{ fontSize: 26 }}>∅</span>
+        <span style={{ fontSize: 13, fontFamily: "'Barlow Condensed'", letterSpacing: "0.05em" }}>No results for "{searchQuery}"</span>
+      </div>
+    );
+  }
+
+  const isSelected = (type, id) => selectedResult && selectedResult.type === type && String(selectedResult.item?.id || selectedResult.item?.pullRequestId) === String(id);
+
+  const inCol = (type, id) => {
+    if (!collection) return false;
+    if (type === "workitem") return (collection.workItemIds || []).includes(String(id));
+    if (type === "repo") return (collection.repoIds || []).includes(String(id));
+    if (type === "pipeline") return (collection.pipelineIds || []).includes(String(id));
+    if (type === "pr") return (collection.prIds || []).includes(String(id));
+    return false;
+  };
+
+  const ToggleBtn = ({ type, id, item }) => {
+    if (!collection) return null;
+    const added = inCol(type, id);
+    return (
+      <button
+        onClick={e => {
+          e.stopPropagation();
+          if (type === "workitem") onWorkItemToggle(collection.id, id);
+          else onResourceToggle(type, id, collection.id);
+        }}
+        title={added ? "Remove from collection" : "Add to collection"}
+        style={{ background: added ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${added ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: added ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0, transition: "all 0.15s" }}
+      >{added ? "✓" : "+"}</button>
+    );
+  };
+
+  const SectionHeader = ({ label, count }) => (
+    <div style={{ padding: "10px 14px 6px", fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", letterSpacing: "0.12em", background: "rgba(255,255,255,0.02)", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span>{label}</span>
+      <span style={{ color: T.dimmer }}>{count}</span>
+    </div>
+  );
+
+  const wiTypeColor = (type) => {
+    if (!type) return T.dim;
+    const t = type.toLowerCase();
+    if (t.includes("bug")) return T.red;
+    if (t.includes("epic")) return T.amber;
+    if (t.includes("feature")) return T.purple;
+    return T.blue;
+  };
+
+  const stateColor = (state) => {
+    if (!state) return T.dim;
+    const s = state.toLowerCase();
+    if (s === "done" || s === "closed" || s === "resolved") return T.green;
+    if (s === "active" || s === "in progress") return T.blue;
+    if (s === "new") return T.dim;
+    return T.muted;
+  };
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto" }}>
+      {results.workItems.length > 0 && (
+        <>
+          <SectionHeader label="WORK ITEMS" count={results.workItems.length} />
+          {results.workItems.map(wi => {
+            const sel = isSelected("workitem", wi.id);
+            const wiType = wi.fields?.["System.WorkItemType"] || "";
+            const wiState = wi.fields?.["System.State"] || "";
+            return (
+              <div key={wi.id} onClick={() => onSelect({ type: "workitem", item: wi })}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? "rgba(245,158,11,0.07)" : "transparent", transition: "background 0.1s" }}
+                onMouseEnter={e => { if (!sel) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+                onMouseLeave={e => { if (!sel) e.currentTarget.style.background = "transparent"; }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: wiTypeColor(wiType), fontFamily: "'JetBrains Mono'", background: `${wiTypeColor(wiType)}22`, borderRadius: 3, padding: "1px 5px", flexShrink: 0, whiteSpace: "nowrap", maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis" }}>{wiType || "WI"}</span>
+                <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>#{wi.id}</span>
+                <span style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wi.fields?.["System.Title"]}</span>
+                <span style={{ fontSize: 10, color: stateColor(wiState), fontFamily: "'JetBrains Mono'", flexShrink: 0, whiteSpace: "nowrap" }}>{wiState}</span>
+                <ToggleBtn type="workitem" id={wi.id} item={wi} />
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {results.repos.length > 0 && (
+        <>
+          <SectionHeader label="REPOSITORIES" count={results.repos.length} />
+          {results.repos.map(r => {
+            const sel = isSelected("repo", r.id);
+            return (
+              <div key={r.id} onClick={() => onSelect({ type: "repo", item: r })}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? "rgba(245,158,11,0.07)" : "transparent", transition: "background 0.1s" }}
+                onMouseEnter={e => { if (!sel) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+                onMouseLeave={e => { if (!sel) e.currentTarget.style.background = "transparent"; }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: T.cyan, fontFamily: "'JetBrains Mono'", background: `${T.cyan}22`, borderRadius: 3, padding: "1px 5px", flexShrink: 0 }}>REPO</span>
+                <span style={{ fontSize: 12, flex: 1, color: T.cyan, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0, whiteSpace: "nowrap" }}>{r.defaultBranch?.replace("refs/heads/", "")}</span>
+                <ToggleBtn type="repo" id={r.id} item={r} />
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {results.pipelines.length > 0 && (
+        <>
+          <SectionHeader label="PIPELINES" count={results.pipelines.length} />
+          {results.pipelines.map(p => {
+            const sel = isSelected("pipeline", p.id);
+            return (
+              <div key={p.id} onClick={() => onSelect({ type: "pipeline", item: p })}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? "rgba(245,158,11,0.07)" : "transparent", transition: "background 0.1s" }}
+                onMouseEnter={e => { if (!sel) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+                onMouseLeave={e => { if (!sel) e.currentTarget.style.background = "transparent"; }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: T.amber, fontFamily: "'JetBrains Mono'", background: `${T.amber}22`, borderRadius: 3, padding: "1px 5px", flexShrink: 0 }}>PIPE</span>
+                <span style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0, whiteSpace: "nowrap" }}>{p.folder !== "\\" ? p.folder : ""}</span>
+                <ToggleBtn type="pipeline" id={p.id} item={p} />
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {results.prs.length > 0 && (
+        <>
+          <SectionHeader label="PULL REQUESTS" count={results.prs.length} />
+          {results.prs.map(pr => {
+            const sel = isSelected("pr", pr.pullRequestId);
+            const prState = pr.status || "";
+            return (
+              <div key={pr.pullRequestId} onClick={() => onSelect({ type: "pr", item: pr })}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? "rgba(245,158,11,0.07)" : "transparent", transition: "background 0.1s" }}
+                onMouseEnter={e => { if (!sel) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+                onMouseLeave={e => { if (!sel) e.currentTarget.style.background = "transparent"; }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: T.purple, fontFamily: "'JetBrains Mono'", background: `${T.purple}22`, borderRadius: 3, padding: "1px 5px", flexShrink: 0 }}>PR</span>
+                <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>#{pr.pullRequestId}</span>
+                <span style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pr.title}</span>
+                <span style={{ fontSize: 10, color: stateColor(prState), fontFamily: "'JetBrains Mono'", flexShrink: 0, whiteSpace: "nowrap" }}>{prState}</span>
+                <ToggleBtn type="pr" id={pr.pullRequestId} item={pr} />
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── SEARCH RESULT DETAIL ───────────────────────────────────── */
+function SearchResultDetail({ result, collection, org, onWorkItemToggle, onResourceToggle }) {
+  if (!result) return null;
+  const { type, item } = result;
+
+  const inCol = () => {
+    if (!collection) return false;
+    if (type === "workitem") return (collection.workItemIds || []).includes(String(item.id));
+    if (type === "repo") return (collection.repoIds || []).includes(String(item.id));
+    if (type === "pipeline") return (collection.pipelineIds || []).includes(String(item.id));
+    if (type === "pr") return (collection.prIds || []).includes(String(item.pullRequestId));
+    return false;
+  };
+  const added = inCol();
+
+  const handleToggle = () => {
+    if (!collection) return;
+    if (type === "workitem") onWorkItemToggle(collection.id, item.id);
+    else if (type === "repo") onResourceToggle("repo", item.id, collection.id);
+    else if (type === "pipeline") onResourceToggle("pipeline", item.id, collection.id);
+    else if (type === "pr") onResourceToggle("pr", item.pullRequestId, collection.id);
+  };
+
+  const ToggleSection = () => (
+    <div style={{ marginBottom: 16 }}>
+      {collection ? (
+        <button onClick={handleToggle}
+          style={{ background: added ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${added ? T.green : "rgba(255,255,255,0.15)"}`, borderRadius: 5, color: added ? T.green : T.muted, cursor: "pointer", padding: "6px 14px", fontSize: 12, fontFamily: "'Barlow'", transition: "all 0.15s" }}>
+          {added ? `✓ In "${collection.name}"` : `+ Add to "${collection.name}"`}
+        </button>
+      ) : (
+        <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>Select a collection to add this item</span>
+      )}
+    </div>
+  );
+
+  const Field = ({ label, value }) => (
+    <div style={{ display: "flex", gap: 12, padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+      <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", minWidth: 110, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 12, color: T.text, wordBreak: "break-all" }}>{value || <span style={{ color: T.dimmer }}>—</span>}</span>
+    </div>
+  );
+
+  const containerStyle = { flex: 1, overflowY: "auto", padding: 24 };
+
+  if (type === "workitem") {
+    const f = item.fields || {};
+    const wiType = f["System.WorkItemType"] || "";
+    const wiState = f["System.State"] || "";
+    const wiTitle = f["System.Title"] || "";
+    const areaPath = f["System.AreaPath"] || "";
+    const assignee = f["System.AssignedTo"]?.displayName || f["System.AssignedTo"] || "";
+    const created = f["System.CreatedDate"] ? new Date(f["System.CreatedDate"]).toLocaleDateString() : "";
+    const typeColorMap = { Bug: T.red, Epic: T.amber, Feature: T.purple, "User Story": T.blue, Task: T.cyan };
+    const tc = typeColorMap[wiType] || T.blue;
+    const adomUrl = org ? `https://dev.azure.com/${org}/_workitems/edit/${item.id}` : null;
+    return (
+      <div style={containerStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: tc, background: `${tc}22`, borderRadius: 4, padding: "2px 8px", fontFamily: "'JetBrains Mono'" }}>{wiType}</span>
+          <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>#{item.id}</span>
+          <span style={{ fontSize: 11, color: T.text, background: "rgba(255,255,255,0.08)", borderRadius: 4, padding: "1px 7px", fontFamily: "'Barlow Condensed'" }}>{wiState}</span>
+        </div>
+        <div style={{ fontSize: 17, fontWeight: 600, color: T.text, marginBottom: 14, lineHeight: 1.35 }}>{wiTitle}</div>
+        <ToggleSection />
+        {adomUrl && <a href={adomUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: T.blue, textDecoration: "none", display: "inline-block", marginBottom: 18 }}>Open in ADO ↗</a>}
+        <div>
+          <Field label="State" value={wiState} />
+          <Field label="Type" value={wiType} />
+          <Field label="Area Path" value={areaPath} />
+          <Field label="Assigned To" value={assignee} />
+          <Field label="Created" value={created} />
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "repo") {
+    const remoteUrl = item.remoteUrl || item.sshUrl || "";
+    const defaultBranch = item.defaultBranch?.replace("refs/heads/", "") || "";
+    const size = item.size != null ? `${Math.round(item.size / 1024)} KB` : "";
+    return (
+      <div style={containerStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: T.cyan, background: `${T.cyan}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>REPO</span>
+        </div>
+        <div style={{ fontSize: 17, fontWeight: 600, color: T.cyan, marginBottom: 14, lineHeight: 1.35 }}>{item.name}</div>
+        <ToggleSection />
+        <div>
+          <Field label="Default Branch" value={defaultBranch} />
+          {size && <Field label="Size" value={size} />}
+          {remoteUrl && <Field label="URL" value={remoteUrl} />}
+          {item.project?.name && <Field label="Project" value={item.project.name} />}
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "pipeline") {
+    const lastRun = item._links?.["web"]?.href || "";
+    const folder = item.folder !== "\\" ? item.folder : "";
+    return (
+      <div style={containerStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: T.amber, background: `${T.amber}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>PIPELINE</span>
+        </div>
+        <div style={{ fontSize: 17, fontWeight: 600, color: T.text, marginBottom: 14, lineHeight: 1.35 }}>{item.name}</div>
+        <ToggleSection />
+        <div>
+          {folder && <Field label="Folder" value={folder} />}
+          <Field label="Definition ID" value={String(item.id)} />
+          {lastRun && <Field label="Web Link" value={lastRun} />}
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "pr") {
+    const author = item.createdBy?.displayName || "";
+    const source = item.sourceRefName?.replace("refs/heads/", "") || "";
+    const target = item.targetRefName?.replace("refs/heads/", "") || "";
+    const created = item.creationDate ? new Date(item.creationDate).toLocaleDateString() : "";
+    const reviewers = (item.reviewers || []).map(r => r.displayName || r.uniqueName).join(", ");
+    const stateColor = (s) => {
+      if (!s) return T.dim;
+      if (s === "active") return T.blue;
+      if (s === "completed") return T.green;
+      if (s === "abandoned") return T.red;
+      return T.muted;
+    };
+    return (
+      <div style={containerStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: T.purple, background: `${T.purple}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>PR</span>
+          <span style={{ fontSize: 10, fontFamily: "'JetBrains Mono'", color: stateColor(item.status), background: `${stateColor(item.status)}22`, borderRadius: 4, padding: "1px 7px" }}>{item.status}</span>
+          <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>#{item.pullRequestId}</span>
+        </div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: T.text, marginBottom: 14, lineHeight: 1.35 }}>{item.title}</div>
+        <ToggleSection />
+        <div>
+          <Field label="Author" value={author} />
+          <Field label="Source Branch" value={source} />
+          <Field label="Target Branch" value={target} />
+          <Field label="Created" value={created} />
+          {reviewers && <Field label="Reviewers" value={reviewers} />}
+          {item.description && <Field label="Description" value={item.description} />}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 /* ─── ROOT ───────────────────────────────────────────────────── */
 export default function App() {
   const [client, setClient]          = useState(null);
   const [org, setOrg]                = useState("");
-  const [collections, setCollections]= useLocalStorage("ado-superui-collections", []);
+  const [profile, setProfile]        = useState(null);
+  const [collectionKey, setCollectionKey] = useState("ado-superui-collections");
+  const [collections, setCollections]= useLocalStorage(collectionKey, []);
   const [activeCol, setActiveCol]    = useState(null);
   const [selectedWI, setSelectedWI]  = useState(null);
-  const [view, setView]              = useState("resources");
+  const [view, setView]              = useState("search");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [selectedSearchResult, setSelectedSearchResult] = useState(null);
+  const [syncStatus, setSyncStatus]  = useState("idle"); // "idle" | "saving" | "saved" | "error"
+  const saveTimerRef = useRef(null);
 
-  const handleConnect = useCallback((c, o) => {
+  const handleConnect = useCallback(async (c, o) => {
     setClient(c); setOrg(o); setView("newCollection");
+    try {
+      const p = await c.getProfile();
+      setProfile(p);
+      setCollectionKey(`ado-superui-collections-${p.id}`);
+      // Load server-side collections — these override localStorage if available
+      const serverCols = await c.loadCollections(p.id);
+      if (serverCols && serverCols.length > 0) {
+        // Write directly to the scoped localStorage key so useLocalStorage picks it up
+        try { localStorage.setItem(`ado-superui-collections-${p.id}`, JSON.stringify(serverCols)); } catch {}
+      }
+    } catch {
+      // PAT lacks vso.profile scope or server unreachable — fall back gracefully
+    }
   }, []);
 
   const handleCollectionCreated = useCallback((col) => {
@@ -1422,6 +2038,56 @@ export default function App() {
     }));
   }, [setCollections]);
 
+  // Debounced server sync — fires 1.5s after the last collections mutation
+  useEffect(() => {
+    if (!client || !profile) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      setSyncStatus("saving");
+      try {
+        await client.saveCollections(profile.id, collections);
+        setSyncStatus("saved");
+        setTimeout(() => setSyncStatus("idle"), 2000);
+      } catch {
+        setSyncStatus("error");
+        setTimeout(() => setSyncStatus("idle"), 3000);
+      }
+    }, 1500);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [collections, client, profile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSearch = useCallback(async (query) => {
+    setSearchQuery(query);
+    setSelectedSearchResult(null);
+    if (!query.trim()) {
+      setSearchResults(null);
+      return;
+    }
+    setSearching(true);
+    try {
+      const results = { workItems: [], repos: [], pipelines: [], prs: [] };
+      const q = query.toLowerCase();
+      
+      const [wi, repos, pipelines, prs] = await Promise.allSettled([
+        client.searchWorkItems(q, { types: [], states: [], assignee: "", areaPath: "" }),
+        client.getAllRepos(),
+        client.getAllPipelines(),
+        client.getAllPullRequests(),
+      ]);
+      
+      results.workItems = wi.status === "fulfilled" ? wi.value.slice(0, 20) : [];
+      results.repos = repos.status === "fulfilled" ? repos.value.filter(r => r.name?.toLowerCase().includes(q)).slice(0, 20) : [];
+      results.pipelines = pipelines.status === "fulfilled" ? pipelines.value.filter(p => p.name?.toLowerCase().includes(q)).slice(0, 20) : [];
+      results.prs = prs.status === "fulfilled" ? prs.value.filter(pr => pr.title?.toLowerCase().includes(q)).slice(0, 20) : [];
+      
+      setSearchResults(results);
+    } catch (e) {
+      console.error("Search error:", e);
+    } finally {
+      setSearching(false);
+    }
+  }, [client]);
+
   const collection = collections.find(c => c.id === activeCol);
 
   if (!client) return <ConnectScreen onConnect={handleConnect} />;
@@ -1435,13 +2101,51 @@ export default function App() {
         input::placeholder { color: #374151; }
       `}</style>
 
-      <div style={{ display: "flex", height: "100vh", background: T.bg, color: T.text, fontFamily: "'Barlow'", overflow: "hidden" }}>
+      <div style={{ display: "flex", height: "100vh", background: T.bg, color: T.text, fontFamily: "'Barlow'", overflow: "hidden", paddingTop: 50 }}>
+
+        {/* Header with Global Search */}
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 50, background: T.panel, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", padding: "0 20px", zIndex: 100 }}>
+          <div style={{ flex: 1, maxWidth: 500, position: "relative", display: "flex", alignItems: "center", gap: 0 }}>
+            <input value={searchQuery} onChange={e => handleSearch(e.target.value)} placeholder="🔍 Search all resources..."
+              style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, outline: "none", color: T.text, padding: "8px 14px", fontSize: 13, fontFamily: "'Barlow'", boxSizing: "border-box" }} />
+            {searchQuery && (
+              <button onClick={() => { setSearchQuery(""); setSearchResults(null); setSelectedSearchResult(null); }} style={{ position: "absolute", right: 8, background: "none", border: "none", color: T.dim, cursor: "pointer", padding: "0 4px", fontSize: 16, lineHeight: 1 }}>×</button>
+            )}
+          </div>
+          {searching && <span style={{ marginLeft: 12, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>searching…</span>}
+          {syncStatus === "saving" && <span style={{ marginLeft: 12, fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>↑ saving…</span>}
+          {syncStatus === "saved"  && <span style={{ marginLeft: 12, fontSize: 10, color: T.green, fontFamily: "'JetBrains Mono'" }}>✓ saved</span>}
+          {syncStatus === "error"  && <span style={{ marginLeft: 12, fontSize: 10, color: T.red, fontFamily: "'JetBrains Mono'" }}>⚠ sync failed</span>}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            {profile && (
+              <>
+                <span style={{ fontSize: 12, color: T.muted, fontFamily: "'Barlow'" }}>{profile.displayName}</span>
+                <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.amber, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 13, color: "#000", flexShrink: 0 }} title={`${profile.displayName} · ${profile.emailAddress}`}>
+                  {(profile.displayName || "?")[0].toUpperCase()}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
 
         {/* Rail */}
         <div style={{ width: 215, background: T.panel, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
-          <div style={{ padding: "16px 14px 12px", borderBottom: `1px solid ${T.border}` }}>
-            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 17, color: T.amber, letterSpacing: "0.05em" }}>ADO SUPERUI</div>
-            <div style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", marginTop: 2 }}>{org}</div>
+          <div style={{ padding: "14px 14px 12px", borderBottom: `1px solid ${T.border}` }}>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 15, color: T.amber, letterSpacing: "0.05em", marginBottom: profile ? 8 : 2 }}>ADO SUPERUI</div>
+            {profile ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.amber, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 13, color: "#000", flexShrink: 0 }}>
+                  {(profile.displayName || "?")[0].toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{profile.displayName}</div>
+                  <div style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1 }}>{profile.emailAddress}</div>
+                  <div style={{ fontSize: 9, color: T.dimmer, fontFamily: "'JetBrains Mono'", marginTop: 1, opacity: 0.6 }}>{org}</div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", marginTop: 2 }}>{org}</div>
+            )}
           </div>
           <div style={{ flex: 1, overflowY: "auto", paddingTop: 10 }}>
             <div style={{ padding: "0 14px 8px", fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", letterSpacing: "0.1em", textTransform: "uppercase" }}>Collections</div>
@@ -1469,7 +2173,7 @@ export default function App() {
               onMouseEnter={e => e.currentTarget.style.opacity = 0.7} onMouseLeave={e => e.currentTarget.style.opacity = 0.35}>
               <span style={{ fontSize: 11, color: T.dim }}>↻ Clear Cache</span>
             </div>
-            <div onClick={() => { setClient(null); setCollections([]); setActiveCol(null); }} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", opacity: 0.35, transition: "opacity 0.15s" }}
+            <div onClick={() => { setClient(null); setCollections([]); setActiveCol(null); setProfile(null); setCollectionKey("ado-superui-collections"); }} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", opacity: 0.35, transition: "opacity 0.15s" }}
               onMouseEnter={e => e.currentTarget.style.opacity = 0.7} onMouseLeave={e => e.currentTarget.style.opacity = 0.35}>
               <span style={{ fontSize: 11, color: T.dim }}>⏻ Disconnect</span>
             </div>
@@ -1478,12 +2182,23 @@ export default function App() {
 
         {/* Centre */}
         <div style={{ width: 370, background: T.panel, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
-          {collection
-            ? <WorkItemPanel client={client} collection={collection} onSelect={wi => { setSelectedWI(wi); setView("resources"); }} selected={selectedWI} onFilterChange={handleCollectionFilterChange} onWorkItemToggle={handleWorkItemToggle} />
-            : <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10, color: T.dim }}>
-                <span style={{ fontSize: 30 }}>⬡</span>
-                <span style={{ fontSize: 13, fontFamily: "'Barlow Condensed'", letterSpacing: "0.05em" }}>Select a collection</span>
-              </div>
+          {searchQuery.trim()
+            ? <SearchResultsList
+                results={searchResults}
+                searching={searching}
+                searchQuery={searchQuery}
+                collection={collection}
+                selectedResult={selectedSearchResult}
+                onSelect={r => { setSelectedSearchResult(r); setSelectedWI(null); }}
+                onWorkItemToggle={handleWorkItemToggle}
+                onResourceToggle={handleResourceToggle}
+              />
+            : collection
+              ? <WorkItemPanel client={client} collection={collection} onSelect={wi => { setSelectedWI(wi); setSelectedSearchResult(null); setView("resources"); }} selected={selectedWI} onFilterChange={handleCollectionFilterChange} onWorkItemToggle={handleWorkItemToggle} />
+              : <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10, color: T.dim }}>
+                  <span style={{ fontSize: 30 }}>⬡</span>
+                  <span style={{ fontSize: 13, fontFamily: "'Barlow Condensed'", letterSpacing: "0.05em" }}>Select a collection</span>
+                </div>
           }
         </div>
 
@@ -1492,16 +2207,18 @@ export default function App() {
           {view === "newCollection"
             ? <CollectionBuilder onDone={handleCollectionCreated} />
             : selectedWI
-              ? <ResourceDetail client={client} workItem={selectedWI} org={org} collections={collections} onResourceToggle={handleResourceToggle} onCreateNewCollection={() => setView("newCollection")} />
-              : collection
-                ? <CollectionResources client={client} collection={collection} collections={collections} onWorkItemToggle={handleWorkItemToggle} onResourceToggle={handleResourceToggle} org={org} onCreateNewCollection={() => setView("newCollection")} />
-                : <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: T.dim }}>
-                    <span style={{ fontSize: 38 }}>⬡</span>
-                    <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 20, letterSpacing: "0.05em" }}>
-                      Create a collection to begin
-                    </span>
-                    <Btn variant="primary" onClick={() => setView("newCollection")}>+ New Collection</Btn>
-                  </div>
+              ? <ResourceDetail client={client} workItem={selectedWI} org={org} collection={collection} onResourceToggle={handleResourceToggle} />
+              : selectedSearchResult
+                ? <SearchResultDetail result={selectedSearchResult} collection={collection} org={org} onWorkItemToggle={handleWorkItemToggle} onResourceToggle={handleResourceToggle} />
+                : collection
+                  ? <CollectionResources client={client} collection={collection} collections={collections} onWorkItemToggle={handleWorkItemToggle} onResourceToggle={handleResourceToggle} org={org} onCreateNewCollection={() => setView("newCollection")} />
+                  : <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: T.dim }}>
+                      <span style={{ fontSize: 38 }}>⬡</span>
+                      <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 20, letterSpacing: "0.05em" }}>
+                        Create a collection to begin
+                      </span>
+                      <Btn variant="primary" onClick={() => setView("newCollection")}>+ New Collection</Btn>
+                    </div>
           }
         </div>
       </div>

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "proxy": "node ado-proxy.js"
+    "proxy": "node ado-proxy.js",
+    "server": "node ado-server.js"
   },
   "dependencies": {
     "react": "^18.2.0",

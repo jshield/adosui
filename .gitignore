@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Database (runtime data — not source)
+*.db
+*.db-shm
+*.db-wal
+
+# Editor / OS
+.DS_Store
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Lock files (keep package-lock.json, ignore pnpm)
+pnpm-lock.yaml
