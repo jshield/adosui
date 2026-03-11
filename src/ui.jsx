@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { PipelinesView } from "./components/views/PipelinesView";
 
 /* ─── LOCAL STORAGE HOOK ─────────────────────────────────────── */
 function useLocalStorage(key, initial) {
