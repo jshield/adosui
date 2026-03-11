@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { T } from "../../lib/theme";
+import { Btn } from "../ui";
 
 export const ALL_TYPES = ["Epic", "Feature", "User Story", "Bug", "Task"];
 export const ALL_STATES = ["New", "Active", "In Progress", "In Review", "Resolved", "Done", "Closed"];
@@ -81,11 +82,3 @@ export function FilterPanel({ filters, onChange, onClose }) {
     </div>
   );
 }
-
-const Btn = ({ children, onClick, variant = "ghost", disabled }) => {
-  const s = {
-    primary: { background: `${T.amber}18`, border: `1px solid ${T.amber}44`, color: T.amber },
-    ghost:   { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: T.muted },
-  }[variant];
-  return <button disabled={disabled} onClick={onClick} style={{ ...s, padding: "7px 16px", borderRadius: 5, cursor: disabled ? "not-allowed" : "pointer", fontSize: 12, fontFamily: "'Barlow'", fontWeight: 500, opacity: disabled ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>;
-};

@@ -1,13 +1,6 @@
 import { useState } from "react";
 import { T } from "../../lib/theme";
-
-const Btn = ({ children, onClick, variant = "ghost", disabled }) => {
-  const s = {
-    primary: { background: `${T.amber}18`, border: `1px solid ${T.amber}44`, color: T.amber },
-    ghost:   { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: T.muted },
-  }[variant];
-  return <button disabled={disabled} onClick={onClick} style={{ ...s, padding: "7px 16px", borderRadius: 5, cursor: disabled ? "not-allowed" : "pointer", fontSize: 12, fontFamily: "'Barlow'", fontWeight: 500, opacity: disabled ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>;
-};
+import { Btn } from "../ui";
 
 export function CollectionBuilder({ onDone }) {
   const [name, setName] = useState("");

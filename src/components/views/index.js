@@ -1,5 +1,12 @@
-export { PipelinesView } from "./PipelinesView";
+export { PipelinesView }                      from "./PipelinesView";
 export { FilterPanel, ALL_TYPES, ALL_STATES } from "./FilterPanel";
-export { ConnectScreen } from "./ConnectScreen";
-export { CollectionBuilder } from "./CollectionBuilder";
-export { WorkItemPanel } from "./WorkItemPanel";
+export { ConnectScreen }                      from "./ConnectScreen";
+export { CollectionBuilder }                  from "./CollectionBuilder";
+export { WorkItemPanel }                      from "./WorkItemPanel";
+export { CollectionDropdown }                 from "./CollectionDropdown";
+export { ResourceDetail }                     from "./ResourceDetail";
+export { CollectionResources }                from "./CollectionResources";
+export { SearchResultsList }                  from "./SearchResultsList";
+export { SearchResultDetail }                 from "./SearchResultDetail";
+export { AppHeader }                          from "./AppHeader";
+export { Rail }                               from "./Rail";

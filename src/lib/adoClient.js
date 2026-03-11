@@ -227,15 +227,12 @@ export class ADOClient {
 
   async loadCollections(profileId) {
     try {
-      const res = await fetch(`${API_PROXY}`, {
-        method: "POST",
+      const res = await fetch("/collections", {
+        method: "GET",
         headers: {
           "Authorization": this._auth,
-          "Content-Type": "application/json",
-          "X-Target-URL": "https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.1",
           "X-Profile-Id": profileId,
         },
-        body: JSON.stringify({ action: "get-collections" }),
       });
       if (!res.ok) return null;
       const data = await res.json();
@@ -246,16 +243,15 @@ export class ADOClient {
   async saveCollections(profileId, collections) {
     try {
       const patHash = await this._patHash();
-      await fetch(`${API_PROXY}`, {
-        method: "POST",
+      await fetch("/collections", {
+        method: "PUT",
         headers: {
           "Authorization": this._auth,
           "Content-Type": "application/json",
-          "X-Target-URL": "https://app.vssps.visualstudio.com/_apis/profile/save-collections",
           "X-Profile-Id": profileId,
           "X-Pat-Hash": patHash,
         },
-        body: JSON.stringify({ action: "save-collections", collections }),
+        body: JSON.stringify({ collections }),
       });
     } catch { /* fire-and-forget */ }
   }

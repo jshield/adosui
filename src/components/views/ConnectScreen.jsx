@@ -1,22 +1,22 @@
 import { useState } from "react";
 import { T, FONTS } from "../../lib/theme";
-import { Spinner } from "../ui";
-import { Dot } from "../ui";
+import { Spinner, Dot } from "../ui";
+import { ADOClient } from "../../lib/adoClient";
 
 export function ConnectScreen({ onConnect }) {
   const [org, setOrg] = useState("");
   const [pat, setPat] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [proxyStatus, setProxyStatus] = useState("idle");
+  const [serverStatus, setServerStatus] = useState("idle");
 
-  const checkProxy = async () => {
-    setProxyStatus("checking");
+  const checkServer = async () => {
+    setServerStatus("checking");
     try {
       await fetch("/health", { method: "GET" });
-      setProxyStatus("ok");
+      setServerStatus("ok");
     } catch {
-      setProxyStatus("error");
+      setServerStatus("error");
     }
   };
 
@@ -24,7 +24,6 @@ export function ConnectScreen({ onConnect }) {
     if (!org.trim() || !pat.trim()) return;
     setLoading(true); setError("");
     try {
-      const { ADOClient } = await import("../../lib/adoClient");
       const c = new ADOClient(org, pat);
       await c.testConnection();
       const projects = await c.getProjects();
@@ -34,7 +33,7 @@ export function ConnectScreen({ onConnect }) {
       const msg = e.message;
       if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed")) {
         setError("Cannot reach the server — make sure ado-server.js is running.");
-        setProxyStatus("error");
+        setServerStatus("error");
       } else if (msg.includes("401") || msg.includes("403")) {
         setError("Authentication failed — verify your PAT has the required scopes.");
       } else if (msg.includes("404")) {
@@ -61,15 +60,15 @@ export function ConnectScreen({ onConnect }) {
         <div style={{ background: `${T.cyan}08`, border: `1px solid ${T.cyan}22`, borderRadius: 8, padding: "16px 18px", marginBottom: 24 }}>
           <div style={{ fontSize: 12, color: T.cyan, fontFamily: "'Barlow Condensed'", fontWeight: 700, letterSpacing: "0.05em", marginBottom: 10 }}>STEP 1 — START THE SERVER</div>
           <div style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", lineHeight: 1.9 }}>
-            Run the ado-server:<br />
+            Run the unified server:<br />
             <span style={{ display: "inline-block", background: "rgba(0,0,0,0.4)", border: `1px solid ${T.border}`, borderRadius: 4, padding: "5px 12px", marginTop: 4, color: T.amber }}>node ado-server.js</span>
           </div>
           <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
-            <Dot color={proxyStatus === "ok" ? T.green : proxyStatus === "checking" ? T.amber : T.dim} pulse={proxyStatus === "checking"} />
-            <span style={{ fontSize: 11, color: proxyStatus === "ok" ? T.green : T.muted, fontFamily: "'JetBrains Mono'" }}>
-              {proxyStatus === "ok" ? "Server reachable ✓" : proxyStatus === "checking" ? "Checking…" : "Not yet checked"}
+            <Dot color={serverStatus === "ok" ? T.green : serverStatus === "checking" ? T.amber : T.dim} pulse={serverStatus === "checking"} />
+            <span style={{ fontSize: 11, color: serverStatus === "ok" ? T.green : T.muted, fontFamily: "'JetBrains Mono'" }}>
+              {serverStatus === "ok" ? "Server reachable ✓" : serverStatus === "checking" ? "Checking…" : "Not yet checked"}
             </span>
-            <button onClick={checkProxy} style={{ marginLeft: "auto", fontSize: 11, color: T.cyan, background: `${T.cyan}10`, border: `1px solid ${T.cyan}33`, borderRadius: 4, padding: "3px 10px", cursor: "pointer", fontFamily: "'JetBrains Mono'" }}>
+            <button onClick={checkServer} style={{ marginLeft: "auto", fontSize: 11, color: T.cyan, background: `${T.cyan}10`, border: `1px solid ${T.cyan}33`, borderRadius: 4, padding: "3px 10px", cursor: "pointer", fontFamily: "'JetBrains Mono'" }}>
               Check
             </button>
           </div>
@@ -108,11 +107,7 @@ export function ConnectScreen({ onConnect }) {
 
         <div style={{ marginTop: 16, fontSize: 11, color: T.dimmer, textAlign: "center", fontFamily: "'JetBrains Mono'", lineHeight: 1.8 }}>
           PAT held in memory only · never stored<br />
-          <span style={{ color: T.dim }}>
-            {USE_PROXY 
-              ? "All traffic goes via local proxy to dev.azure.com" 
-              : "Connecting directly to dev.azure.com"}
-          </span>
+          <span style={{ color: T.dim }}>All traffic goes via local server to dev.azure.com</span>
         </div>
       </div>
     </div>
