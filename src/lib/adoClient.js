@@ -1,4 +1,4 @@
-import { cache, CACHE_TTL, API_PROXY } from "../lib";
+import { cache, CACHE_TTL } from "../lib";
 
 export class ADOClient {
   constructor(org, pat) {
@@ -10,13 +10,15 @@ export class ADOClient {
     this._projects = [];
   }
 
+  updatePat(pat) {
+    this.pat = pat;
+    this._auth = `Basic ${btoa(":" + pat)}`;
+    this.clearCache();
+  }
+
   clearCache() {
     cache.clear();
     this._projects = [];
-  }
-
-  _getEndpoint(url) {
-    return API_PROXY;
   }
 
   _getHeaders(opts = {}) {
@@ -24,20 +26,18 @@ export class ADOClient {
       "Authorization": this._auth,
       "Content-Type": "application/json",
       "Accept": "application/json",
-      "X-Target-URL": opts.targetUrl || "",
     };
     return headers;
   }
 
   async _fetch(url, opts = {}) {
-    const endpoint = this._getEndpoint(url);
     const fetchOpts = {
       method: opts.method || "GET",
-      headers: this._getHeaders({ ...opts, targetUrl: url }),
+      headers: this._getHeaders(opts),
       body: opts.body || undefined,
     };
-    
-    const res = await fetch(endpoint, fetchOpts);
+
+    const res = await fetch(url, fetchOpts);
     if (!res.ok) {
       let msg = res.statusText;
       try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
@@ -383,33 +383,21 @@ export class ADOClient {
    */
   async upsertWikiPage(project, wikiId, pagePath, content) {
     const encodedPath = encodeURIComponent(pagePath);
+    const url = `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${wikiId}/pages?path=${encodedPath}&api-version=7.1`;
+
     // First try to get the current ETag (version) so we can update rather than conflict
     let eTag = null;
     try {
-      const getResp = await fetch(API_PROXY, {
-        method: "GET",
-        headers: this._getHeaders({
-          targetUrl: `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${wikiId}/pages?path=${encodedPath}&api-version=7.1`,
-        }),
-      });
+      const getResp = await fetch(url, { method: "GET", headers: this._getHeaders() });
       if (getResp.ok) {
         eTag = getResp.headers.get("ETag");
       }
     } catch { /* page doesn't exist yet — that's fine */ }
 
-    const headers = {
-      ...this._getHeaders({
-        targetUrl: `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${wikiId}/pages?path=${encodedPath}&api-version=7.1`,
-      }),
-      "Content-Type": "application/json",
-    };
+    const headers = { ...this._getHeaders(), "Content-Type": "application/json" };
     if (eTag) headers["If-Match"] = eTag;
 
-    const res = await fetch(API_PROXY, {
-      method: "PUT",
-      headers,
-      body: JSON.stringify({ content }),
-    });
+    const res = await fetch(url, { method: "PUT", headers, body: JSON.stringify({ content }) });
 
     if (!res.ok) {
       let msg = res.statusText;

@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 /**
  * ado-server.js
- * Unified server for ADO SuperUI:
- *   - Proxies ADO API requests on behalf of the browser (CORS proxy)
- *   - Collections are now stored in an ADO Git repository — no local persistence here
+ * Optional static file server for ADO SuperUI (SPA).
+ *
+ * NOTE: The proxy routes below are deprecated. The SPA now calls Azure DevOps
+ * directly from the browser (CORS is allowed by dev.azure.com).
+ *
+ * This server remains useful only for:
+ *   - Serving the built SPA from a local directory (e.g. for self-hosting)
  *
  * Routes:
- *   OPTIONS  *               CORS preflight
- *   POST     /ado-proxy      Proxy a request to Azure DevOps (X-Target-URL header)
+ *   OPTIONS  *               CORS preflight (still enabled)
+ *   POST     /ado-proxy      [DEPRECATED] Proxy a request to Azure DevOps
  *   GET      /health         Liveness check
  *   GET      /               Static SPA files + SPA fallback
  */
@@ -106,47 +110,6 @@ function serveSpa(res, origin) {
 
 // ── ADO proxy handler ─────────────────────────────────────────────────────────
 
-async function handleProxy(req, res, origin) {
-  const targetUrl = req.headers['x-target-url'];
-  if (!targetUrl) {
-    return json(res, 400, { error: 'Missing X-Target-URL header' }, origin);
-  }
-
-  const isHttps  = targetUrl.startsWith('https://');
-  const upstream = isHttps ? https : http;
-
-  // Forward everything except hop-by-hop / routing headers.
-  // Strip accept-encoding so ADO returns plain JSON (not gzip) — the proxy
-  // pipes the body as-is and drops Content-Encoding, which would cause the
-  // browser to receive compressed bytes it can't decode.
-  const forwardHeaders = { ...req.headers };
-  delete forwardHeaders['host'];
-  delete forwardHeaders['origin'];
-  delete forwardHeaders['referer'];
-  delete forwardHeaders['x-target-url'];
-  delete forwardHeaders['accept-encoding'];
-
-  const options = { method: req.method, headers: forwardHeaders };
-
-  const proxyReq = upstream.request(targetUrl, options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, {
-      'Content-Type': proxyRes.headers['content-type'] || 'application/json',
-      'Access-Control-Allow-Origin': origin || '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, X-Target-URL',
-      'Access-Control-Allow-Credentials': 'true',
-    });
-    proxyRes.pipe(res);
-  });
-
-  proxyReq.on('error', (err) => {
-    console.error(`[proxy] Upstream error: ${err.message}`);
-    json(res, 502, { error: 'Bad gateway', message: err.message }, origin);
-  });
-
-  req.pipe(proxyReq);
-}
-
 // ── Main request router ───────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -167,15 +130,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, ts: new Date().toISOString() }, origin);
   }
 
-  // ADO proxy route — explicit path
-  if (url === '/ado-proxy') {
-    return handleProxy(req, res, origin);
-  }
 
-  // Legacy fallback: old proxy used root path with X-Target-URL header
-  if (req.headers['x-target-url']) {
-    return handleProxy(req, res, origin);
-  }
 
   // Try static files first
   if (serveStatic(req, res)) return;
@@ -188,11 +143,9 @@ const server = http.createServer(async (req, res) => {
 
 server.on('listening', () => {
   console.log(`ADO SuperUI server running on http://127.0.0.1:${PORT}`);
-  console.log(`  Proxy:   POST /ado-proxy  (legacy: any path with X-Target-URL)`);
-  console.log(`  Health:  GET /health`);
   console.log(`  Static:  GET / (serves SPA from ${DIST_PATH})`);
+  console.log(`  Health:  GET /health`);
   console.log(`  Origins: ${ALLOWED_ORIGINS.join(', ')}`);
-  console.log(`  Storage: ADO Git repository (configured per-user at setup time)`);
 });
 
 server.on('error', (err) => {

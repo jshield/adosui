@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { T } from "../../lib/theme";
-import { Dot, UserAvatar, SectionLabel } from "../ui";
+import { Dot, UserAvatar, Spinner } from "../ui";
 import { PINNED_PIPELINES_ID } from "../../lib/adoStorage";
+import { updatePAT as updateStoredPAT } from "../../lib/credentialStore";
 
 const SYNC_LABEL = {
   idle:   null,
@@ -9,12 +11,40 @@ const SYNC_LABEL = {
   error:  { text: "Save failed", color: T.red },
 };
 
-export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines }) {
+export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, client, onUpdatePat }) {
   // Split into shared and personal, hiding the reserved pinned-pipelines collection
   const shared   = collections.filter(c => c.scope !== "personal");
   const personal = collections.filter(c => c.scope === "personal" && c.id !== PINNED_PIPELINES_ID);
 
   const syncInfo = SYNC_LABEL[syncStatus] || null;
+
+  // PAT swap inline state
+  const [showPatForm, setShowPatForm] = useState(false);
+  const [newPat, setNewPat] = useState("");
+  const [patUpdating, setPatUpdating] = useState(false);
+  const [patError, setPatError] = useState("");
+
+  const handleUpdatePat = async () => {
+    if (!newPat.trim()) return;
+    setPatUpdating(true);
+    setPatError("");
+    try {
+      // 1. Persist encrypted PAT in storage
+      await updateStoredPAT(newPat.trim());
+      // 2. Update the ADOClient instance in-place
+      client.updatePat(newPat.trim());
+      // 3. Verify it works (quick check)
+      await client.testConnection();
+      setNewPat("");
+      setShowPatForm(false);
+      // Show a brief success sync indicator
+      onUpdatePat?.();
+    } catch (e) {
+      setPatError(e.message || "Failed to update PAT");
+    } finally {
+      setPatUpdating(false);
+    }
+  };
 
   const renderCollection = (c) => (
     <div key={c.id} onClick={() => onSelectCollection(c.id)}
@@ -98,6 +128,7 @@ export function Rail({ profile, org, collections, activeCol, activeView, syncSta
             {syncInfo.text}
           </div>
         )}
+
         <div onClick={onNewCollection} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", opacity: 0.6, transition: "opacity 0.15s", marginBottom: 9 }}
           onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0.6}>
           <span style={{ color: T.amber, fontSize: 13 }}>＋</span>
@@ -107,6 +138,27 @@ export function Rail({ profile, org, collections, activeCol, activeView, syncSta
           onMouseEnter={e => e.currentTarget.style.opacity = 0.7} onMouseLeave={e => e.currentTarget.style.opacity = 0.35}>
           <span style={{ fontSize: 11, color: T.dim }}>↻ Clear Cache</span>
         </div>
+
+        {/* PAT Swap */}
+        <div style={{ marginBottom: 8 }}>
+          <button onClick={() => setShowPatForm(!showPatForm)} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", opacity: showPatForm ? 1 : 0.35, transition: "opacity 0.15s", background: "none", border: "none", padding: 0, width: "100%", textAlign: "left", marginBottom: 9 }}
+            onMouseEnter={e => { if (!showPatForm) e.currentTarget.style.opacity = 0.7; }}
+            onMouseLeave={e => { if (!showPatForm) e.currentTarget.style.opacity = 0.35; }}>
+            <span style={{ fontSize: 11, color: T.dim }}>🔑 Update PAT</span>
+          </button>
+          {showPatForm && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <input value={newPat} onChange={e => setNewPat(e.target.value)} placeholder="New PAT..."
+                style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: `1px solid ${patError ? T.red + "55" : "rgba(255,255,255,0.12)"}`, borderRadius: 4, outline: "none", color: T.text, padding: "6px 10px", fontSize: 11, fontFamily: "'JetBrains Mono'" }}
+                onKeyDown={e => e.key === "Enter" && handleUpdatePat()} />
+              {patUpdating ? <Spinner size={13} /> :
+                <button onClick={handleUpdatePat} disabled={!newPat.trim()} style={{ padding: "0 10px", background: `${T.amber}18`, border: `1px solid ${T.amber}44`, borderRadius: 4, color: T.amber, fontSize: 11, cursor: "pointer" }}>Apply</button>
+              }
+            </div>
+          )}
+          {patError && <div style={{ fontSize: 9, color: T.red, fontFamily: "'JetBrains Mono'", marginBottom: 6 }}>{patError}</div>}
+        </div>
+
         <div onClick={onDisconnect} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", opacity: 0.35, transition: "opacity 0.15s" }}
           onMouseEnter={e => e.currentTarget.style.opacity = 0.7} onMouseLeave={e => e.currentTarget.style.opacity = 0.35}>
           <span style={{ fontSize: 11, color: T.dim }}>⏻ Disconnect</span>

@@ -1,9 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { T, FONTS } from "./lib/theme";
 import { ADOClient } from "./lib/adoClient";
-import { ADOStorage, ADOStorage as _ADOStorage, PINNED_PIPELINES_ID, ConflictError, migrateCollection } from "./lib/adoStorage";
+import { ADOStorage, PINNED_PIPELINES_ID, ConflictError, migrateCollection } from "./lib/adoStorage";
 import { syncCollectionToWiki } from "./lib/wikiSync";
-import { Btn } from "./components/ui";
 import {
   ConnectScreen,
   SetupScreen,
@@ -17,6 +16,7 @@ import {
   AppHeader,
   Rail,
 } from "./components/views";
+import { hasStoredCredentials, clearCredentials, loadPAT, clearSessionKey } from "./lib/credentialStore";
 
 // localStorage key for config repo pointer (non-sensitive, org-scoped)
 const REPO_CONFIG_KEY = "ado-superui-repo-config";
@@ -38,15 +38,12 @@ export default function App() {
   const [org,      setOrg]      = useState("");
   const [profile,  setProfile]  = useState(null);
 
-  // Setup / onboarding
-  // "connect" | "setup" | "app"
-  const [appPhase, setAppPhase] = useState("connect");
-  const [pendingClient, setPendingClient] = useState(null);
-  const [pendingOrg,    setPendingOrg]    = useState("");
+  // App flow phase
+  const [appPhase, setAppPhase] = useState("connect"); // "connect" | "setup" | "app"
 
-  // Storage
-  const [storage,    setStorage]    = useState(null);  // ADOStorage instance
-  const [repoConfig, setRepoConfig] = useState(null);  // { project, repoId, repoName, wikiId, wikiProject }
+  // Storage (repo config)
+  const [storage,    setStorage]    = useState(null);
+  const [repoConfig, setRepoConfig] = useState(null);
 
   // Collections
   const [collections,  setCollections]  = useState([]);
@@ -54,8 +51,7 @@ export default function App() {
   const [selectedWI,   setSelectedWI]   = useState(null);
 
   // View
-  // "search" | "newCollection" | "resources" | "pipelines"
-  const [view, setView] = useState("search");
+  const [view, setView] = useState("search"); // "search" | "newCollection" | "resources" | "pipelines"
 
   // Search
   const [searchQuery,           setSearchQuery]           = useState("");
@@ -63,35 +59,35 @@ export default function App() {
   const [searching,             setSearching]             = useState(false);
   const [selectedSearchResult,  setSelectedSearchResult]  = useState(null);
 
-  // Sync
-  const [syncStatus,  setSyncStatus]  = useState("idle"); // "idle"|"saving"|"saved"|"error"
-  const [toast,       setToast]       = useState(null);   // { message, color }
+  // Sync status
+  const [syncStatus,  setSyncStatus]  = useState("idle");
+  const [toast,       setToast]       = useState(null);
   const saveTimerRef  = useRef(null);
-  const pendingSaves  = useRef(new Set()); // collection IDs queued for save
+  const pendingSaves  = useRef(new Set());
 
-  /* ── Helpers ─────────────────────────────────────────────────── */
+  // Toast helper
   const showToast = useCallback((message, color = T.amber) => {
     setToast({ message, color });
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  /* ── Connect ─────────────────────────────────────────────────── */
-  const handleConnect = useCallback(async (c, o) => {
-    setPendingClient(c);
-    setPendingOrg(o);
+  // Handle connect (auth via stored credentials or new login)
+  const handleConnect = useCallback(async (c, orgName, authInfo) => {
+    // `authInfo` contains: authMode, passphrase (if passphrase mode)
+    // We already know the PAT is stored and decrypted by ConnectScreen
     try {
       const p = await c.getProfile();
-      // Check if we have a stored repo config
       const cfg = loadRepoConfig();
-      if (cfg && p) {
-        // Config found and profile loaded — go straight to app
-        const stor = new ADOStorage(c, cfg, p);
-        setClient(c);
-        setOrg(o);
-        setProfile(p);
-        setStorage(stor);
-        setRepoConfig(cfg);
-        // Load collections
+
+      const stor = new ADOStorage(c, cfg || { project: "", repoId: "", repoName: "" }, p);
+      setClient(c);
+      setOrg(orgName);
+      setProfile(p);
+      setStorage(stor);
+      setRepoConfig(cfg);
+
+      // If we have a repo config, try to load collections; else go to setup
+      if (cfg) {
         setSyncStatus("saving");
         try {
           const cols = await stor.loadAll();
@@ -101,66 +97,51 @@ export default function App() {
           setSyncStatus("error");
           showToast(`Failed to load collections: ${e.message}`, T.red);
         }
-        setView("newCollection");
         setAppPhase("app");
+        setView("newCollection");
       } else {
-        // No config — go to setup
         setAppPhase("setup");
       }
-    } catch {
-      // Profile fetch failed (no vso.profile scope) — still go to setup
-      setAppPhase("setup");
+    } catch (e) {
+      showToast(`Connect failed: ${e.message}`, T.red);
     }
   }, [showToast]);
 
-  /* ── Setup complete ──────────────────────────────────────────── */
+  // Setup screen completed (repo configured)
   const handleSetupComplete = useCallback(async (cfg) => {
     saveRepoConfig(cfg);
     setRepoConfig(cfg);
-    // Fetch profile; re-try once in case it failed during connect
-    let p = profile;
-    try { p = await pendingClient.getProfile(); } catch {}
-    if (!p) {
-      showToast(
-        "Could not load your ADO profile — check your PAT has the vso.profile scope, then reconnect.",
-        T.red
-      );
-      clearRepoConfig();
-      setRepoConfig(null);
-      return;
-    }
-    const stor = new ADOStorage(pendingClient, cfg, p);
-    setClient(pendingClient);
-    setOrg(pendingOrg);
-    setProfile(p);
-    setStorage(stor);
-    // Load collections (empty repo is fine — returns [])
-    setSyncStatus("saving");
-    try {
-      const cols = await stor.loadAll();
-      setCollections(cols);
-      setSyncStatus("idle");
-    } catch (e) {
-      setSyncStatus("error");
-      showToast(`Failed to load collections: ${e.message}`, T.red);
-    }
-    setView("newCollection");
-    setAppPhase("app");
-  }, [pendingClient, pendingOrg, profile, showToast]);
 
-  /* ── Persist a single collection (debounced per-collection) ─── */
+    // The client and profile should already be set from handleConnect
+    // Reload the collections now that we have a repo config
+    if (client && profile) {
+      const stor = new ADOStorage(client, cfg, profile);
+      setStorage(stor);
+      setSyncStatus("saving");
+      try {
+        const cols = await stor.loadAll();
+        setCollections(cols);
+        setSyncStatus("idle");
+      } catch (e) {
+        setSyncStatus("error");
+        showToast(`Failed to load collections: ${e.message}`, T.red);
+      }
+    }
+    setAppPhase("app");
+    setView("newCollection");
+  }, [client, profile, showToast]);
+
+  // Persist a single collection (debounced)
   const persistCollection = useCallback(async (collection) => {
     if (!storage) return;
     setSyncStatus("saving");
     try {
       const newObjectId = await storage.save(collection);
-      // Stamp the fresh objectId back so the next save goes straight to "edit"
       if (newObjectId && newObjectId !== collection._objectId) {
         setCollections(cols =>
           cols.map(c => c.id === collection.id ? { ...c, _objectId: newObjectId } : c)
         );
       }
-      // Wiki sync (fire-and-forget, non-blocking)
       if (repoConfig?.wikiId) {
         syncCollectionToWiki(client, { project: repoConfig.wikiProject || repoConfig.project, wikiId: repoConfig.wikiId }, collection, org).catch(() => {});
       }
@@ -181,7 +162,6 @@ export default function App() {
   useEffect(() => {
     if (!storage || !collections.length) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    // Only save collections that are marked dirty
     const dirty = collections.filter(c => pendingSaves.current.has(c.id));
     if (!dirty.length) return;
     saveTimerRef.current = setTimeout(async () => {
@@ -193,7 +173,6 @@ export default function App() {
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [collections, storage, persistCollection]);
 
-  // Mark a collection dirty and update state
   const updateCollection = useCallback((id, updater) => {
     setCollections(cols => {
       const next = cols.map(c => c.id === id ? updater(c) : c);
@@ -202,7 +181,6 @@ export default function App() {
     });
   }, []);
 
-  /* ── Collection mutations ────────────────────────────────────── */
   const handleCollectionCreated = useCallback(async (col) => {
     const newCol = migrateCollection({
       ...col,
@@ -239,7 +217,7 @@ export default function App() {
 
   const handleWorkItemToggle = useCallback((colId, workItemId) => {
     updateCollection(colId, c => {
-      const ids    = c.workItemIds || [];
+      const ids = c.workItemIds || [];
       const newIds = ids.includes(String(workItemId))
         ? ids.filter(id => id !== String(workItemId))
         : [...ids, String(workItemId)];
@@ -268,7 +246,6 @@ export default function App() {
     });
   }, [updateCollection]);
 
-  /* ── Comment handlers ────────────────────────────────────────── */
   const handleAddComment = useCallback((colId, resourceType, resourceId, text) => {
     if (!profile) return;
     const comment = {
@@ -313,16 +290,15 @@ export default function App() {
     updateCollection(colId, c => ({ ...c, comments: [...(c.comments || []), comment] }));
   }, [profile, updateCollection]);
 
-  /* ── Pinned pipelines (personal collection) ──────────────────── */
+  // Pinned pipelines personal collection
   const pinnedCollection = ADOStorage.getPinnedCollection(collections, profile);
 
   const handleTogglePin = useCallback((pipeline) => {
     const existing = collections.find(c => c.id === PINNED_PIPELINES_ID && c.scope === "personal");
-    const colId    = PINNED_PIPELINES_ID;
-    const pid      = String(pipeline.id);
+    const colId = PINNED_PIPELINES_ID;
+    const pid = String(pipeline.id);
 
     if (!existing) {
-      // Create the personal pinned-pipelines collection
       const newCol = {
         ...pinnedCollection,
         pipelines: [{
@@ -359,14 +335,14 @@ export default function App() {
     });
   }, [collections, pinnedCollection, updateCollection]);
 
-  /* ── Global search ───────────────────────────────────────────── */
-  const handleSearch = useCallback(async (query) => {
-    setSearchQuery(query);
+  // Global search
+  const handleSearch = useCallback(async (q) => {
+    setSearchQuery(q);
     setSelectedSearchResult(null);
-    if (!query.trim()) { setSearchResults(null); return; }
+    if (!q.trim()) { setSearchResults(null); return; }
     setSearching(true);
     try {
-      const q = query.toLowerCase();
+      const lower = q.toLowerCase();
       const [wi, repos, pipelines, prs] = await Promise.allSettled([
         client.searchWorkItems(q, {}),
         client.getAllRepos(),
@@ -375,9 +351,9 @@ export default function App() {
       ]);
       setSearchResults({
         workItems: wi.status        === "fulfilled" ? wi.value.slice(0, 20)                                                    : [],
-        repos:     repos.status     === "fulfilled" ? repos.value.filter(r => r.name?.toLowerCase().includes(q)).slice(0, 20)      : [],
-        pipelines: pipelines.status === "fulfilled" ? pipelines.value.filter(p => p.name?.toLowerCase().includes(q)).slice(0, 20) : [],
-        prs:       prs.status       === "fulfilled" ? prs.value.filter(pr => pr.title?.toLowerCase().includes(q)).slice(0, 20)    : [],
+        repos:     repos.status     === "fulfilled" ? repos.value.filter(r => r.name?.toLowerCase().includes(lower)).slice(0, 20)      : [],
+        pipelines: pipelines.status === "fulfilled" ? pipelines.value.filter(p => p.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
+        prs:       prs.status       === "fulfilled" ? prs.value.filter(pr => pr.title?.toLowerCase().includes(lower)).slice(0, 20)    : [],
       });
     } catch (e) {
       console.error("Search error:", e);
@@ -386,13 +362,14 @@ export default function App() {
     }
   }, [client]);
 
-  /* ── Disconnect / cache clear ────────────────────────────────── */
+  // Disconnect
   const handleDisconnect = useCallback(() => {
     setClient(null); setOrg(""); setProfile(null);
     setCollections([]); setActiveCol(null); setStorage(null);
     setRepoConfig(null);
     setAppPhase("connect");
-    setPendingClient(null); setPendingOrg("");
+    clearCredentials();
+    clearRepoConfig();
   }, []);
 
   const handleClearCache = useCallback(() => {
@@ -403,34 +380,73 @@ export default function App() {
     setTimeout(() => setActiveCol(cur), 0);
   }, [client, activeCol]);
 
-  /* ── Derived ─────────────────────────────────────────────────── */
+  // PAT update handler (called from Rail when user updates PAT)
+  const handleUpdatePat = useCallback(() => {
+    showToast("PAT updated successfully", T.green);
+  }, [showToast]);
+
+  // Auto-resume session on mount if credentials exist
+  useEffect(() => {
+    // If we already have a client, don't auto-resume
+    if (client) return;
+
+    // Try to auto-resume from stored credentials
+    const resume = async () => {
+      try {
+        const stored = await loadPAT();
+        if (stored && stored.pat && stored.data) {
+          const { pat, data } = stored;
+          const c = new ADOClient(data.org, pat);
+          await c.testConnection();
+          const p = await c.getProfile();
+          const cfg = loadRepoConfig();
+          const stor = new ADOStorage(c, cfg || { project: "", repoId: "", repoName: "" }, p);
+          setClient(c);
+          setOrg(data.org);
+          setProfile(p);
+          setStorage(stor);
+          setRepoConfig(cfg);
+
+          if (cfg) {
+            setSyncStatus("saving");
+            try {
+              const cols = await stor.loadAll();
+              setCollections(cols);
+              setSyncStatus("idle");
+            } catch (e) {
+              setSyncStatus("error");
+              showToast(`Failed to load collections: ${e.message}`, T.red);
+            }
+            setAppPhase("app");
+            setView("newCollection");
+          } else {
+            setAppPhase("setup");
+          }
+        }
+      } catch {
+        // Cannot auto-resume — stay on connect screen
+      }
+    };
+    resume();
+  }, [client, showToast]);
+
   const collection = collections.find(c => c.id === activeCol);
 
-  /* ── Phase: connect ──────────────────────────────────────────── */
+  /* ── Render: Connect screen ───────────────────────────────────── */
   if (appPhase === "connect") return <ConnectScreen onConnect={handleConnect} />;
 
-  /* ── Phase: setup ────────────────────────────────────────────── */
-  if (appPhase === "setup") return (
-    <SetupScreen
-      client={pendingClient}
-      org={pendingOrg}
-      onSetupComplete={handleSetupComplete}
-      onBack={() => { setAppPhase("connect"); setPendingClient(null); setPendingOrg(""); }}
-    />
-  );
+  /* ── Render: Setup screen ─────────────────────────────────────── */
+  if (appPhase === "setup") return <SetupScreen
+    client={client}
+    org={org}
+    onSetupComplete={handleSetupComplete}
+    onBack={handleDisconnect}
+  />;
 
-  /* ── Phase: app ──────────────────────────────────────────────── */
+  /* ── Render: App ──────────────────────────────────────────────── */
   return (
     <>
-      <style>{FONTS + `
-        @keyframes spin { to { transform: rotate(360deg); } }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #1F2937; border-radius: 2px; }
-        input::placeholder { color: #374151; }
-        textarea::placeholder { color: #374151; }
-      `}</style>
+      <style>{FONTS + `@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
       {/* Toast notification */}
       {toast && (
@@ -475,6 +491,8 @@ export default function App() {
           onClearCache={handleClearCache}
           onDisconnect={handleDisconnect}
           onShowPipelines={() => setView("pipelines")}
+          client={client}
+          onUpdatePat={handleUpdatePat}
         />
 
         {/* ── Pipelines full-width view ────────────────────────── */}
@@ -498,7 +516,7 @@ export default function App() {
                   searchQuery={searchQuery}
                   collection={collection}
                   selectedResult={selectedSearchResult}
-                  onSelect={r => { setSelectedSearchResult(r); setSelectedWI(null); }}
+                  onSelect={r => { setSelectedSearchResult(r); setSelectedWI(null); setView("resources"); }}
                   onWorkItemToggle={handleWorkItemToggle}
                   onResourceToggle={handleResourceToggle}
                 />
@@ -557,7 +575,6 @@ export default function App() {
                 <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: T.dim }}>
                   <span style={{ fontSize: 38 }}>⬡</span>
                   <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 20, letterSpacing: "0.05em" }}>Create a collection to begin</span>
-                  <Btn variant="primary" onClick={() => setView("newCollection")}>+ New Collection</Btn>
                 </div>
               )}
             </div>
