@@ -1,4 +1,4 @@
-import { cache, CACHE_TTL, USE_PROXY, PROXY } from "../lib";
+import { cache, CACHE_TTL, API_PROXY } from "../lib";
 
 export class ADOClient {
   constructor(org, pat) {
@@ -16,10 +16,7 @@ export class ADOClient {
   }
 
   _getEndpoint(url) {
-    if (USE_PROXY) {
-      return PROXY;
-    }
-    return url;
+    return API_PROXY;
   }
 
   _getHeaders(opts = {}) {
@@ -27,11 +24,8 @@ export class ADOClient {
       "Authorization": this._auth,
       "Content-Type": "application/json",
       "Accept": "application/json",
-      ...(opts.headers || {}),
+      "X-Target-URL": opts.targetUrl || "",
     };
-    if (USE_PROXY) {
-      headers["X-Target-URL"] = opts.targetUrl || "";
-    }
     return headers;
   }
 
@@ -232,14 +226,16 @@ export class ADOClient {
   }
 
   async loadCollections(profileId) {
-    if (!USE_PROXY) return null;
     try {
-      const res = await fetch(`${PROXY}/collections`, {
-        method: "GET",
+      const res = await fetch(`${API_PROXY}`, {
+        method: "POST",
         headers: {
           "Authorization": this._auth,
+          "Content-Type": "application/json",
+          "X-Target-URL": "https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.1",
           "X-Profile-Id": profileId,
         },
+        body: JSON.stringify({ action: "get-collections" }),
       });
       if (!res.ok) return null;
       const data = await res.json();
@@ -248,18 +244,18 @@ export class ADOClient {
   }
 
   async saveCollections(profileId, collections) {
-    if (!USE_PROXY) return;
     try {
       const patHash = await this._patHash();
-      await fetch(`${PROXY}/collections`, {
-        method: "PUT",
+      await fetch(`${API_PROXY}`, {
+        method: "POST",
         headers: {
           "Authorization": this._auth,
           "Content-Type": "application/json",
+          "X-Target-URL": "https://app.vssps.visualstudio.com/_apis/profile/save-collections",
           "X-Profile-Id": profileId,
           "X-Pat-Hash": patHash,
         },
-        body: JSON.stringify({ collections }),
+        body: JSON.stringify({ action: "save-collections", collections }),
       });
     } catch { /* fire-and-forget */ }
   }

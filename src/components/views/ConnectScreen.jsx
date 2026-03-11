@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { T, FONTS, USE_PROXY, PROXY } from "../../lib/theme";
+import { T, FONTS } from "../../lib/theme";
 import { Spinner } from "../ui";
 import { Dot } from "../ui";
 
@@ -8,13 +8,12 @@ export function ConnectScreen({ onConnect }) {
   const [pat, setPat] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [proxyStatus, setProxyStatus] = useState(USE_PROXY ? "idle" : "noproxy");
+  const [proxyStatus, setProxyStatus] = useState("idle");
 
   const checkProxy = async () => {
-    if (!USE_PROXY) return;
     setProxyStatus("checking");
     try {
-      await fetch(PROXY, { method: "OPTIONS" });
+      await fetch("/health", { method: "GET" });
       setProxyStatus("ok");
     } catch {
       setProxyStatus("error");
@@ -33,8 +32,8 @@ export function ConnectScreen({ onConnect }) {
       onConnect(c, org.trim());
     } catch (e) {
       const msg = e.message;
-      if (USE_PROXY && (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed"))) {
-        setError(`Cannot reach proxy at ${PROXY} — make sure ado-proxy.js is running, or set VITE_USE_PROXY=false for direct access.`);
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed")) {
+        setError("Cannot reach the server — make sure ado-server.js is running.");
         setProxyStatus("error");
       } else if (msg.includes("401") || msg.includes("403")) {
         setError("Authentication failed — verify your PAT has the required scopes.");
@@ -59,36 +58,25 @@ export function ConnectScreen({ onConnect }) {
           <div style={{ fontSize: 12, color: T.dim, fontFamily: "'JetBrains Mono'", marginTop: 5 }}>work-centric azure devops workspace</div>
         </div>
 
-        {USE_PROXY && (
-          <div style={{ background: `${T.cyan}08`, border: `1px solid ${T.cyan}22`, borderRadius: 8, padding: "16px 18px", marginBottom: 24 }}>
-            <div style={{ fontSize: 12, color: T.cyan, fontFamily: "'Barlow Condensed'", fontWeight: 700, letterSpacing: "0.05em", marginBottom: 10 }}>STEP 1 — START THE PROXY</div>
-            <div style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", lineHeight: 1.9 }}>
-              Download <span style={{ color: T.text }}>ado-proxy.js</span> (from this repo), then run:<br />
-              <span style={{ display: "inline-block", background: "rgba(0,0,0,0.4)", border: `1px solid ${T.border}`, borderRadius: 4, padding: "5px 12px", marginTop: 4, color: T.amber }}>node ado-proxy.js</span>
-            </div>
-            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
-              <Dot color={proxyStatus === "ok" ? T.green : proxyStatus === "checking" ? T.amber : T.dim} pulse={proxyStatus === "checking"} />
-              <span style={{ fontSize: 11, color: proxyStatus === "ok" ? T.green : T.muted, fontFamily: "'JetBrains Mono'" }}>
-                {proxyStatus === "ok" ? "Proxy reachable ✓" : proxyStatus === "checking" ? "Checking…" : "Not yet checked"}
-              </span>
-              <button onClick={checkProxy} style={{ marginLeft: "auto", fontSize: 11, color: T.cyan, background: `${T.cyan}10`, border: `1px solid ${T.cyan}33`, borderRadius: 4, padding: "3px 10px", cursor: "pointer", fontFamily: "'JetBrains Mono'" }}>
-                Check proxy
-              </button>
-            </div>
+        <div style={{ background: `${T.cyan}08`, border: `1px solid ${T.cyan}22`, borderRadius: 8, padding: "16px 18px", marginBottom: 24 }}>
+          <div style={{ fontSize: 12, color: T.cyan, fontFamily: "'Barlow Condensed'", fontWeight: 700, letterSpacing: "0.05em", marginBottom: 10 }}>STEP 1 — START THE SERVER</div>
+          <div style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", lineHeight: 1.9 }}>
+            Run the ado-server:<br />
+            <span style={{ display: "inline-block", background: "rgba(0,0,0,0.4)", border: `1px solid ${T.border}`, borderRadius: 4, padding: "5px 12px", marginTop: 4, color: T.amber }}>node ado-server.js</span>
           </div>
-        )}
-
-        {!USE_PROXY && (
-          <div style={{ background: `${T.green}08`, border: `1px solid ${T.green}22`, borderRadius: 8, padding: "16px 18px", marginBottom: 24 }}>
-            <div style={{ fontSize: 12, color: T.green, fontFamily: "'Barlow Condensed'", fontWeight: 700, letterSpacing: "0.05em", marginBottom: 6 }}>DIRECT MODE</div>
-            <div style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", lineHeight: 1.6 }}>
-              Connecting directly to dev.azure.com — no proxy required.
-            </div>
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
+            <Dot color={proxyStatus === "ok" ? T.green : proxyStatus === "checking" ? T.amber : T.dim} pulse={proxyStatus === "checking"} />
+            <span style={{ fontSize: 11, color: proxyStatus === "ok" ? T.green : T.muted, fontFamily: "'JetBrains Mono'" }}>
+              {proxyStatus === "ok" ? "Server reachable ✓" : proxyStatus === "checking" ? "Checking…" : "Not yet checked"}
+            </span>
+            <button onClick={checkProxy} style={{ marginLeft: "auto", fontSize: 11, color: T.cyan, background: `${T.cyan}10`, border: `1px solid ${T.cyan}33`, borderRadius: 4, padding: "3px 10px", cursor: "pointer", fontFamily: "'JetBrains Mono'" }}>
+              Check
+            </button>
           </div>
-        )}
+        </div>
 
         <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 10, padding: 28 }}>
-          <div style={{ fontSize: 16, fontWeight: 600, color: T.muted, marginBottom: 20, fontFamily: "'Barlow Condensed'", letterSpacing: "0.04em" }}>{USE_PROXY ? "STEP 2" : "STEP 1"} — CONNECT</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: T.muted, marginBottom: 20, fontFamily: "'Barlow Condensed'", letterSpacing: "0.04em" }}>STEP 2 — CONNECT</div>
 
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", letterSpacing: "0.08em", textTransform: "uppercase", display: "block", marginBottom: 7 }}>Organisation</label>

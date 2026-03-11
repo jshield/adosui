@@ -17,5 +17,4 @@ export const T = {
 
 export const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700&family=JetBrains+Mono:wght@400;500&family=Barlow:wght@300;400;500;600&display=swap');`;
 
-export const USE_PROXY = import.meta.env.VITE_USE_PROXY !== "false";
-export const PROXY = import.meta.env.VITE_PROXY_URL || "http://localhost:3131";
+export const API_PROXY = "/ado-proxy";

@@ -199,12 +199,73 @@ async function handlePutCollections(req, res, origin) {
   }
 }
 
+async function handleCollectionsAction(req, res, origin, action) {
+  const profileId = req.headers['x-profile-id'];
+  const patHash   = req.headers['x-pat-hash'];
+
+  if (action === 'get-collections') {
+    if (!profileId) return json(res, 400, { error: 'Missing X-Profile-Id header' }, origin);
+    try {
+      const stmt = db.prepare('SELECT collections FROM users WHERE profile_id = ?');
+      const row  = stmt.get(profileId);
+      if (!row) return json(res, 200, { collections: [] }, origin);
+      return json(res, 200, { collections: JSON.parse(row.collections) }, origin);
+    } catch (err) {
+      console.error('[db] get-collections error:', err.message);
+      return json(res, 500, { error: 'Database error' }, origin);
+    }
+  }
+
+  if (action === 'save-collections') {
+    if (!profileId) return json(res, 400, { error: 'Missing X-Profile-Id header' }, origin);
+    if (!patHash)   return json(res, 400, { error: 'Missing X-Pat-Hash header' }, origin);
+
+    let body;
+    try {
+      const raw = await readBody(req);
+      body = JSON.parse(raw);
+    } catch {
+      return json(res, 400, { error: 'Invalid JSON body' }, origin);
+    }
+
+    const collections = body.collections;
+    if (!Array.isArray(collections)) {
+      return json(res, 400, { error: 'Body must have a "collections" array' }, origin);
+    }
+
+    try {
+      const collectionsJson = JSON.stringify(collections);
+      const stmt = db.prepare(`
+        INSERT INTO users (profile_id, pat_hash, collections, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(profile_id) DO UPDATE SET
+          pat_hash    = excluded.pat_hash,
+          collections = excluded.collections,
+          updated_at  = datetime('now')
+      `);
+      stmt.run(profileId, patHash, collectionsJson);
+      return json(res, 200, { ok: true }, origin);
+    } catch (err) {
+      console.error('[db] save-collections error:', err.message);
+      return json(res, 500, { error: 'Database error' }, origin);
+    }
+  }
+
+  return json(res, 404, { error: 'Unknown action' }, origin);
+}
+
 // ── ADO proxy handler ─────────────────────────────────────────────────────────
 
-function handleProxy(req, res, origin) {
+async function handleProxy(req, res, origin) {
   const targetUrl = req.headers['x-target-url'];
   if (!targetUrl) {
     return json(res, 400, { error: 'Missing X-Target-URL header' }, origin);
+  }
+
+  // Check for internal actions first
+  if (targetUrl.includes('save-collections') || targetUrl.includes('get-collections')) {
+    const action = targetUrl.includes('save-collections') ? 'save-collections' : 'get-collections';
+    return handleCollectionsAction(req, res, origin, action);
   }
 
   const isHttps  = targetUrl.startsWith('https://');
