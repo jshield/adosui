@@ -1,14 +1,28 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
-import { Pill, Dot, Card, Spinner } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, pipelineStatus } from "../../lib/wiUtils";
+import { Pill, Dot, Card, Spinner, CommentThread } from "../ui";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, pipelineStatus, prStatus, branchName } from "../../lib";
 
-export function CollectionResources({ client, collection, onWorkItemToggle, onResourceToggle }) {
+export function CollectionResources({
+  client,
+  collection,
+  profile,
+  onWorkItemToggle,
+  onResourceToggle,
+  onAddComment,       // (collectionId, resourceType, resourceId, text) => void
+  onAddCollectionNote, // (collectionId, text) => void
+  syncStatus,
+}) {
   const [workItems,  setWorkItems]  = useState([]);
   const [repos,      setRepos]      = useState([]);
   const [pipelines,  setPipelines]  = useState([]);
   const [prs,        setPrs]        = useState([]);
   const [loading,    setLoading]    = useState(true);
+
+  // Derive the repo/pipeline IDs from the structured objects
+  const repoIds     = (collection.repos     || []).map(r => r.id);
+  const pipelineIds = (collection.pipelines || []).map(p => String(p.id));
+  const prIds       = collection.prIds || [];
 
   useEffect(() => {
     setLoading(true);
@@ -17,16 +31,16 @@ export function CollectionResources({ client, collection, onWorkItemToggle, onRe
         ? client.getWorkItemsByIds(collection.workItemIds.map(id => parseInt(id)))
         : Promise.resolve([]);
 
-      const reposPromise = collection.repoIds?.length > 0
-        ? client.getAllRepos().then(all => all.filter(r => collection.repoIds.includes(r.id)))
+      const reposPromise = repoIds.length > 0
+        ? client.getAllRepos().then(all => all.filter(r => repoIds.includes(r.id)))
         : Promise.resolve([]);
 
-      const pipesPromise = collection.pipelineIds?.length > 0
-        ? client.getAllPipelines().then(all => all.filter(p => collection.pipelineIds.includes(String(p.id))))
+      const pipesPromise = pipelineIds.length > 0
+        ? client.getAllPipelines().then(all => all.filter(p => pipelineIds.includes(String(p.id))))
         : Promise.resolve([]);
 
-      const prsPromise = collection.prIds?.length > 0
-        ? client.getAllPullRequests().then(all => all.filter(pr => collection.prIds.includes(String(pr.pullRequestId))))
+      const prsPromise = prIds.length > 0
+        ? client.getAllPullRequests().then(all => all.filter(pr => prIds.includes(String(pr.pullRequestId))))
         : Promise.resolve([]);
 
       const [wi, r, p, pr] = await Promise.allSettled([wiPromise, reposPromise, pipesPromise, prsPromise]);
@@ -37,7 +51,7 @@ export function CollectionResources({ client, collection, onWorkItemToggle, onRe
       setLoading(false);
     };
     fetchData();
-  }, [collection.id, collection.workItemIds, collection.repoIds, collection.pipelineIds, collection.prIds]);
+  }, [collection.id, JSON.stringify(repoIds), JSON.stringify(pipelineIds), JSON.stringify(prIds), collection.workItemIds?.join(",")]);
 
   const removeItem = (type, id) => {
     if (type === "workitem") onWorkItemToggle(collection.id, id);
@@ -46,7 +60,7 @@ export function CollectionResources({ client, collection, onWorkItemToggle, onRe
 
   const RemoveBtn = ({ type, id }) => (
     <button onClick={() => removeItem(type, id)}
-      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12 }}>
+      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12, flexShrink: 0 }}>
       × Remove
     </button>
   );
@@ -63,21 +77,43 @@ export function CollectionResources({ client, collection, onWorkItemToggle, onRe
     );
   };
 
+  // Lookup comment objects from collection for a given resource type + id
+  const getRepoComments     = (id) => (collection.repos     || []).find(r => r.id === String(id))?.comments || [];
+  const getPipelineComments = (id) => (collection.pipelines || []).find(p => String(p.id) === String(id))?.comments || [];
+
   const empty = workItems.length === 0 && repos.length === 0 && pipelines.length === 0 && prs.length === 0;
+  const authorName = profile?.displayName || "";
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ padding: "18px 24px 16px", borderBottom: `1px solid ${T.border}`, background: T.panel, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 24 }}>{collection.icon}</span>
-          <div>
-            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: "#F9FAFB" }}>{collection.name}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: T.heading }}>{collection.name}</div>
             <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
-              {collection.workItemIds?.length || 0} work items · {collection.repoIds?.length || 0} repos · {collection.pipelineIds?.length || 0} pipelines · {collection.prIds?.length || 0} PRs
+              {collection.workItemIds?.length || 0} work items · {repoIds.length} repos · {pipelineIds.length} pipelines · {prIds.length} PRs
+              {collection.scope && (
+                <span style={{ marginLeft: 10, color: collection.scope === "shared" ? T.cyan : T.violet, opacity: 0.7 }}>
+                  · {collection.scope}
+                </span>
+              )}
             </div>
           </div>
           <Dot color={collection.color} />
         </div>
+
+        {/* Collection-level notes thread */}
+        {onAddCollectionNote && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+            <CommentThread
+              comments={collection.comments || []}
+              onAdd={(text) => onAddCollectionNote(collection.id, text)}
+              authorName={authorName}
+              disabled={syncStatus === "saving"}
+            />
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
@@ -110,10 +146,18 @@ export function CollectionResources({ client, collection, onWorkItemToggle, onRe
             <Group title="Repositories" items={repos} renderItem={r => (
               <div key={r.id} style={{ marginBottom: 8 }}>
                 <Card accent={T.cyan}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
                       <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.cyan }}>{r.name}</span>
-                      <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginLeft: 8 }}>/{r.defaultBranch?.replace("refs/heads/", "") || "main"}</span>
+                      <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginLeft: 8 }}>/{branchName(r.defaultBranch) || "main"}</span>
+                      {onAddComment && (
+                        <CommentThread
+                          comments={getRepoComments(r.id)}
+                          onAdd={(text) => onAddComment(collection.id, "repo", r.id, text)}
+                          authorName={authorName}
+                          disabled={syncStatus === "saving"}
+                        />
+                      )}
                     </div>
                     <RemoveBtn type="repo" id={r.id} />
                   </div>
@@ -126,11 +170,21 @@ export function CollectionResources({ client, collection, onWorkItemToggle, onRe
               return (
                 <div key={p.id} style={{ marginBottom: 8 }}>
                   <Card accent={rs.color}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Dot color={rs.color} pulse={rs.label === "running"} />
-                        <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.text }}>{p.name}</span>
-                        <Pill label={rs.label} color={rs.color} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <Dot color={rs.color} pulse={rs.label === "running"} />
+                          <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.text }}>{p.name}</span>
+                          <Pill label={rs.label} color={rs.color} />
+                        </div>
+                        {onAddComment && (
+                          <CommentThread
+                            comments={getPipelineComments(p.id)}
+                            onAdd={(text) => onAddComment(collection.id, "pipeline", p.id, text)}
+                            authorName={authorName}
+                            disabled={syncStatus === "saving"}
+                          />
+                        )}
                       </div>
                       <RemoveBtn type="pipeline" id={p.id} />
                     </div>
@@ -140,11 +194,10 @@ export function CollectionResources({ client, collection, onWorkItemToggle, onRe
             }} />
 
             <Group title="Pull Requests" items={prs} renderItem={pr => {
-              const prColor = { active: T.cyan, completed: T.green, abandoned: T.muted }[pr.status] || T.dim;
-              const prLabel = { active: "open", completed: "merged", abandoned: "closed" }[pr.status] || pr.status;
+              const status = prStatus(pr.status);
               return (
                 <div key={pr.pullRequestId} style={{ marginBottom: 8 }}>
-                  <Card accent={prColor}>
+                  <Card accent={status.color}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div style={{ flex: 1 }}>
                         <div>
@@ -153,11 +206,11 @@ export function CollectionResources({ client, collection, onWorkItemToggle, onRe
                         </div>
                         <div style={{ marginTop: 4, display: "flex", gap: 12, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
                           <span>{pr.createdBy?.displayName}</span>
-                          <span>→ {pr.targetRefName?.replace("refs/heads/", "")}</span>
+                          <span>→ {branchName(pr.targetRefName)}</span>
                         </div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Pill label={prLabel} color={prColor} />
+                        <Pill label={status.label} color={status.color} />
                         <RemoveBtn type="pr" id={pr.pullRequestId} />
                       </div>
                     </div>

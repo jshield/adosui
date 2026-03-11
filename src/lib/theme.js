@@ -3,6 +3,7 @@ export const T = {
   panel: "#0D0F13",
   border: "rgba(255,255,255,0.06)",
   text: "#E5E7EB",
+  heading: "#F9FAFB",
   muted: "#6B7280",
   dim: "#374151",
   dimmer: "#1F2937",

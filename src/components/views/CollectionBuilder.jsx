@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { T } from "../../lib/theme";
-import { Btn } from "../ui";
+import { Btn, formLabelStyle, Input } from "../ui";
 
 export function CollectionBuilder({ onDone }) {
   const [name, setName] = useState("");
@@ -18,20 +18,19 @@ export function CollectionBuilder({ onDone }) {
       </div>
 
       <div>
-        <label style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", letterSpacing: "0.08em", textTransform: "uppercase", display: "block", marginBottom: 7 }}>Name</label>
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. My Tasks"
-          style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, outline: "none", color: T.text, padding: "9px 13px", fontSize: 13, fontFamily: "'Barlow'", boxSizing: "border-box" }} />
+        <label style={formLabelStyle}>Name</label>
+        <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. My Tasks" />
       </div>
 
       <div style={{ display: "flex", gap: 20 }}>
         <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", letterSpacing: "0.08em", textTransform: "uppercase", display: "block", marginBottom: 7 }}>Icon</label>
+          <label style={formLabelStyle}>Icon</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
             {ICONS.map(ic => <span key={ic} onClick={() => setIcon(ic)} style={{ fontSize: 18, cursor: "pointer", padding: 5, borderRadius: 5, background: icon === ic ? "rgba(255,255,255,0.08)" : "transparent", border: icon === ic ? "1px solid rgba(255,255,255,0.14)" : "1px solid transparent" }}>{ic}</span>)}
           </div>
         </div>
         <div style={{ flex: 1 }}>
-          <label style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", letterSpacing: "0.08em", textTransform: "uppercase", display: "block", marginBottom: 7 }}>Colour</label>
+          <label style={formLabelStyle}>Colour</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {COLORS.map(c => <span key={c} onClick={() => setColor(c)} style={{ width: 22, height: 22, borderRadius: "50%", background: c, cursor: "pointer", outline: color === c ? `2px solid ${c}` : "none", outlineOffset: 2 }} />)}
           </div>

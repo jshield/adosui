@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { T, FONTS } from "../../lib/theme";
-import { Spinner, Dot } from "../ui";
+import { Spinner, Dot, formLabelStyle, Input } from "../ui";
 import { ADOClient } from "../../lib/adoClient";
 
 export function ConnectScreen({ onConnect }) {
@@ -78,7 +78,7 @@ export function ConnectScreen({ onConnect }) {
           <div style={{ fontSize: 16, fontWeight: 600, color: T.muted, marginBottom: 20, fontFamily: "'Barlow Condensed'", letterSpacing: "0.04em" }}>STEP 2 — CONNECT</div>
 
           <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", letterSpacing: "0.08em", textTransform: "uppercase", display: "block", marginBottom: 7 }}>Organisation</label>
+            <label style={formLabelStyle}>Organisation</label>
             <div style={{ display: "flex", alignItems: "center", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, overflow: "hidden" }}>
               <span style={{ padding: "0 10px", color: T.dim, fontSize: 11, fontFamily: "'JetBrains Mono'", borderRight: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>dev.azure.com/</span>
               <input value={org} onChange={e => setOrg(e.target.value)} onKeyDown={e => e.key === "Enter" && connect()} placeholder="your-org"
@@ -87,9 +87,8 @@ export function ConnectScreen({ onConnect }) {
           </div>
 
           <div style={{ marginBottom: 22 }}>
-            <label style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", letterSpacing: "0.08em", textTransform: "uppercase", display: "block", marginBottom: 7 }}>Personal Access Token</label>
-            <input type="password" value={pat} onChange={e => setPat(e.target.value)} onKeyDown={e => e.key === "Enter" && connect()} placeholder="••••••••••••••••••••"
-              style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, outline: "none", color: T.text, padding: "10px 14px", fontSize: 13, fontFamily: "'JetBrains Mono'", boxSizing: "border-box" }} />
+            <label style={formLabelStyle}>Personal Access Token</label>
+            <Input type="password" value={pat} onChange={e => setPat(e.target.value)} onKeyDown={e => e.key === "Enter" && connect()} placeholder="••••••••••••••••••••" />
             <div style={{ fontSize: 10, color: T.dim, marginTop: 6, fontFamily: "'JetBrains Mono'" }}>
               Scopes: <span style={{ color: "#4B5563" }}>Code·Read · Work Items·Read · Build·Read · Test·Read</span>
             </div>

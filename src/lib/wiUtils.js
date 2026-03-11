@@ -46,3 +46,32 @@ export const pipelineStatus = r => {
   if (l === "canceled")  return { color: T.muted, label: "cancelled" };
   return { color: T.dim, label: r || "unknown" };
 };
+
+/* ── Branch name cleaning ──────────────────────────────────────── */
+export const branchName = ref => (ref || "").replace("refs/heads/", "");
+
+/* ── PR status ─────────────────────────────────────────────────── */
+export const prStatus = s => {
+  const l = (s || "").toLowerCase();
+  if (l === "active")    return { color: T.cyan, label: "open" };
+  if (l === "completed") return { color: T.green, label: "merged" };
+  if (l === "abandoned") return { color: T.muted, label: "closed" };
+  return { color: T.dim, label: s || "unknown" };
+};
+
+/* ── Collection membership check ────────────────────────────────── */
+export const isInCollection = (collection, type, id) => {
+  if (!collection) return false;
+  const key = {
+    workitem: "workItemIds",
+    repo: "repoIds",
+    pipeline: "pipelineIds",
+    pr: "prIds",
+  }[type];
+  if (!key) return false;
+  return (collection[key] || []).includes(String(id));
+};
+
+/* ── ADO URL helpers ───────────────────────────────────────────── */
+export const workItemUrl = (org, id) => `https://dev.azure.com/${encodeURIComponent(org)}/_workitems/edit/${id}`;
+export const pipelineUrl = (org, project, id) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_build?definitionId=${id}`;

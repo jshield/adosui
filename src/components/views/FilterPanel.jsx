@@ -1,18 +1,9 @@
 import { useState } from "react";
-import { T } from "../../lib/theme";
-import { Btn } from "../ui";
+import { T, WI_TYPE_COLOR, stateColor } from "../../lib";
+import { Btn, Input, popoverStyle } from "../ui";
 
 export const ALL_TYPES = ["Epic", "Feature", "User Story", "Bug", "Task"];
 export const ALL_STATES = ["New", "Active", "In Progress", "In Review", "Resolved", "Done", "Closed"];
-
-const WI_TYPE_COLOR = { Epic: T.amber, Feature: T.cyan, "User Story": T.violet, Bug: T.red, Task: "#94A3B8" };
-const stateColor = s => {
-  const l = (s || "").toLowerCase();
-  if (l.includes("active") || l.includes("progress") || l.includes("doing")) return T.cyan;
-  if (l.includes("done") || l.includes("closed") || l.includes("resolved") || l.includes("complete")) return T.green;
-  if (l.includes("block")) return T.red;
-  return T.muted;
-};
 
 export function FilterPanel({ filters, onChange, onClose }) {
   const [local, setLocal] = useState(filters || { types: [], states: [], assignee: "", areaPath: "" });
@@ -32,7 +23,7 @@ export function FilterPanel({ filters, onChange, onClose }) {
   };
   
   return (
-    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: T.panel, border: `1px solid ${T.border}`, borderRadius: 6, padding: 14, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.5)", marginTop: 4 }}>
+    <div style={{ ...popoverStyle, top: "100%", left: 0, right: 0, padding: 14, marginTop: 4 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span style={{ fontSize: 11, color: T.muted, fontFamily: "'JetBrains Mono'", letterSpacing: "0.08em", textTransform: "uppercase" }}>Filters</span>
         <button onClick={onClose} style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", fontSize: 14 }}>×</button>
@@ -65,13 +56,21 @@ export function FilterPanel({ filters, onChange, onClose }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Assignee</div>
-          <input value={local.assignee} onChange={e => setLocal(l => ({ ...l, assignee: e.target.value }))} placeholder="e.g. John"
-            style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "6px 8px", fontSize: 11, color: T.text, fontFamily: "'JetBrains Mono'", outline: "none" }} />
+          <Input
+            value={local.assignee}
+            onChange={e => setLocal(l => ({ ...l, assignee: e.target.value }))}
+            placeholder="e.g. John"
+            style={{ padding: "6px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'" }}
+          />
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>Area Path</div>
-          <input value={local.areaPath} onChange={e => setLocal(l => ({ ...l, areaPath: e.target.value }))} placeholder="e.g. MyProject"
-            style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "6px 8px", fontSize: 11, color: T.text, fontFamily: "'JetBrains Mono'", outline: "none" }} />
+          <Input
+            value={local.areaPath}
+            onChange={e => setLocal(l => ({ ...l, areaPath: e.target.value }))}
+            placeholder="e.g. MyProject"
+            style={{ padding: "6px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'" }}
+          />
         </div>
       </div>
       

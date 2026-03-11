@@ -1,17 +1,7 @@
 import { useState, useEffect } from "react";
-import { T } from "../../lib/theme";
-import { Pill, Dot, Spinner } from "../ui";
+import { T, WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, isInCollection } from "../../lib";
+import { Pill, Dot, Spinner, Input, SelectableRow, ToggleBtn } from "../ui";
 import { FilterPanel } from "./FilterPanel";
-
-const WI_TYPE_COLOR = { Epic: T.amber, Feature: T.cyan, "User Story": T.violet, Bug: T.red, Task: "#94A3B8" };
-const WI_TYPE_SHORT = { Epic: "EPIC", Feature: "FEAT", "User Story": "STORY", Bug: "BUG", Task: "TASK" };
-const stateColor = s => {
-  const l = (s || "").toLowerCase();
-  if (l.includes("active") || l.includes("progress") || l.includes("doing")) return T.cyan;
-  if (l.includes("done") || l.includes("closed") || l.includes("resolved") || l.includes("complete")) return T.green;
-  if (l.includes("block")) return T.red;
-  return T.muted;
-};
 
 export function WorkItemPanel({ client, collection, onSelect, selected, onFilterChange, onWorkItemToggle }) {
   const [items, setItems] = useState([]);
@@ -65,8 +55,12 @@ export function WorkItemPanel({ client, collection, onSelect, selected, onFilter
           {hasSavedItems && <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>({collection.workItemIds.length} saved)</span>}
         </div>
         <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 6 }}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder={hasSavedItems ? "Search to add more..." : "Search work items..."}
-            style={{ flex: 1, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 5, outline: "none", color: T.text, padding: "7px 11px", fontSize: 12, fontFamily: "'Barlow'", boxSizing: "border-box" }} />
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder={hasSavedItems ? "Search to add more..." : "Search work items..."}
+            style={{ flex: 1, padding: "7px 11px" }}
+          />
           <button onClick={() => setShowFilters(!showFilters)}
             style={{ background: hasFilters ? `${T.amber}18` : "rgba(255,255,255,0.04)", border: `1px solid ${hasFilters ? T.amber + "44" : "rgba(255,255,255,0.08)"}`, borderRadius: 5, padding: "7px 10px", cursor: "pointer", color: hasFilters ? T.amber : T.muted, fontSize: 12, fontFamily: "'Barlow'" }}>
             ⚙ Filters {hasFilters && `(${filters.types.length + filters.states.length + (filters.assignee ? 1 : 0) + (filters.areaPath ? 1 : 0)})`}
@@ -106,26 +100,15 @@ export function WorkItemPanel({ client, collection, onSelect, selected, onFilter
               const type  = wi.fields?.["System.WorkItemType"] || "Task";
               const state = wi.fields?.["System.State"] || "";
               const isSel = selected?.id === wi.id;
+              const isInCol = isInCollection(collection, "workitem", wi.id);
               return (
-                <div key={wi.id} onClick={() => onSelect(wi)}
-                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", borderLeft: `2px solid ${isSel ? collection.color : "transparent"}`, background: isSel ? `${collection.color}08` : "transparent", transition: "all 0.12s", position: "relative" }}
-                  onMouseEnter={e => { if (!isSel) { e.currentTarget.style.background = "rgba(255,255,255,0.025)"; } }}
-                  onMouseLeave={e => { if (!isSel) { e.currentTarget.style.background = "transparent"; } }}>
+                <SelectableRow key={wi.id} sel={isSel} selColor={collection.color} onClick={() => onSelect(wi)}>
                   <span style={{ fontSize: 9, color: WI_TYPE_COLOR[type] || T.dim, fontFamily: "'JetBrains Mono'", width: 42, flexShrink: 0 }}>{WI_TYPE_SHORT[type] || type.slice(0,5).toUpperCase()}</span>
                   <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", width: 38, flexShrink: 0 }}>#{wi.id}</span>
                   <span style={{ flex: 1, fontSize: 12, color: isSel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{wi.fields?.["System.Title"]}</span>
                   <Pill label={state} color={stateColor(state)} />
-                  {(() => {
-                    const isInCollection = collection.workItemIds?.includes(String(wi.id));
-                    return (
-                      <button onClick={(e) => { e.stopPropagation(); onWorkItemToggle(collection.id, wi.id); }}
-                        title={isInCollection ? "Remove from collection" : "Add to collection"}
-                        style={{ background: isInCollection ? `${collection.color}18` : "rgba(255,255,255,0.04)", border: `1px solid ${isInCollection ? collection.color + "44" : "rgba(255,255,255,0.08)"}`, borderRadius: 4, padding: "3px 8px", cursor: "pointer", color: isInCollection ? collection.color : T.muted, fontSize: 12, display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
-                        {isInCollection ? "✓" : "+"}
-                      </button>
-                    );
-                  })()}
-                </div>
+                  <ToggleBtn added={isInCol} color={collection.color} onClick={(e) => { e.stopPropagation(); onWorkItemToggle(collection.id, wi.id); }} label={isInCol ? "✓" : "+"} />
+                </SelectableRow>
               );
             })}
             {!sorted.length && !loading && (

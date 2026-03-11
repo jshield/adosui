@@ -1,5 +1,5 @@
 import { T } from "../../lib/theme";
-import { Spinner } from "../ui";
+import { Spinner, UserAvatar } from "../ui";
 
 export function AppHeader({ searchQuery, onSearch, onClearSearch, searching, syncStatus, profile }) {
   return (
@@ -28,12 +28,7 @@ export function AppHeader({ searchQuery, onSearch, onClearSearch, searching, syn
         {profile && (
           <>
             <span style={{ fontSize: 12, color: T.muted, fontFamily: "'Barlow'" }}>{profile.displayName}</span>
-            <div
-              style={{ width: 28, height: 28, borderRadius: "50%", background: T.amber, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 13, color: "#000", flexShrink: 0 }}
-              title={`${profile.displayName} · ${profile.emailAddress}`}
-            >
-              {(profile.displayName || "?")[0].toUpperCase()}
-            </div>
+            <UserAvatar profile={profile} />
           </>
         )}
       </div>

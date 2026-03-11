@@ -1,7 +1,22 @@
 import { useState, useCallback, useEffect } from "react";
 import { T } from "../../lib/theme";
+import { Dot, SelectableRow, Field } from "../ui";
+import { timeAgo, pipelineStatus, branchName, pipelineUrl } from "../../lib";
 
-export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
+/**
+ * PipelinesView
+ *
+ * Props:
+ *   client            – ADOClient
+ *   org               – string
+ *   pinnedCollection  – the personal "pinned-pipelines" collection object
+ *                       ({ pipelines: [{ id, name, project, folder, configurationType, comments }] })
+ *   onTogglePin       – (pipeline) => void  called with the full ADO pipeline object
+ */
+export function PipelinesView({ client, org, pinnedCollection, onTogglePin }) {
+  // Derive the pinned list from the collection's pipelines array
+  const pinnedPipelines = pinnedCollection?.pipelines || [];
+
   const [allPipelines, setAllPipelines] = useState([]);
   const [pipelineRuns, setPipelineRuns] = useState({});
   const [loading, setLoading] = useState(true);
@@ -30,22 +45,19 @@ export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
         pinnedPipelines.map(async (p) => {
           try {
             const pipeline = allPipelines.find(pl => String(pl.id) === String(p.id));
-            const configType = p.configurationType || pipeline?.configuration?.type;
+            const configType  = p.configurationType || pipeline?.configuration?.type;
             const projectName = p.project || pipeline?._projectName;
-            
-            if (!projectName) {
-              runsMap[p.id] = null;
-              return;
-            }
+
+            if (!projectName) { runsMap[p.id] = null; return; }
 
             let runs = [];
-            if (configType === 'yaml') {
+            if (configType === "yaml") {
               runs = await client.getPipelineRuns(projectName, p.id);
             } else {
               runs = await client.getBuildRuns(projectName, p.id);
             }
             runsMap[p.id] = runs[0] || null;
-          } catch (e) {
+          } catch {
             runsMap[p.id] = null;
           }
         })
@@ -58,9 +70,7 @@ export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
     }
   }, [client, pinnedPipelines, allPipelines]);
 
-  useEffect(() => {
-    fetchPipelines();
-  }, [fetchPipelines]);
+  useEffect(() => { fetchPipelines(); }, [fetchPipelines]);
 
   useEffect(() => {
     if (allPipelines.length) {
@@ -70,27 +80,12 @@ export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
     }
   }, [allPipelines.length, pinnedPipelines.length, fetchRuns]);
 
-  const getStatus = (run) => {
-    if (!run) return { color: T.dim, label: "no runs" };
-    const state = (run.state || "").toLowerCase();
-    const result = (run.result || "").toLowerCase();
-    if (state === "inprogress" || state === "running") return { color: T.amber, label: "running", pulse: true };
-    if (result === "succeeded") return { color: T.green, label: "passed" };
-    if (result === "failed") return { color: T.red, label: "failed" };
-    if (result === "canceled") return { color: T.muted, label: "canceled" };
-    return { color: T.dim, label: state || "unknown" };
-  };
-
-  const filteredPipelines = allPipelines.filter(p => 
+  const filteredPipelines = allPipelines.filter(p =>
     !searchQuery || p.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
   const pinnedIds = new Set(pinnedPipelines.map(p => String(p.id)));
 
   const getPipelineRun = (pipeline) => pipelineRuns[String(pipeline.id)] || pipeline.latestRun || null;
-
-  const Dot = ({ color, pulse }) => (
-    <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block", marginRight: 4, animation: pulse ? "pulse 1s infinite" : "none" }} />
-  );
 
   const renderList = () => {
     if (loading) return <div style={{ padding: 20, color: T.dim }}>Loading...</div>;
@@ -99,19 +94,27 @@ export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
         {pinnedPipelines.length > 0 && (
           <>
             <div style={{ padding: "8px 14px", fontSize: 10, color: T.amber, background: "rgba(245,158,11,0.05)", borderBottom: `1px solid ${T.border}` }}>
-              Pinned ({pinnedPipelines.length}) <button onClick={fetchRuns} disabled={refreshing} style={{ background: "none", border: "none", color: T.cyan, cursor: "pointer", float: "right" }}>{refreshing ? "..." : "↻"}</button>
+              Pinned ({pinnedPipelines.length})
+              <button onClick={fetchRuns} disabled={refreshing} style={{ background: "none", border: "none", color: T.cyan, cursor: "pointer", float: "right" }}>
+                {refreshing ? "..." : "↻"}
+              </button>
             </div>
             {pinnedPipelines.map((p) => {
-              const run = pipelineRuns[p.id];
-              const status = getStatus(run);
-              const sel = selectedPipeline && String(selectedPipeline.id) === String(p.id);
+              const run    = pipelineRuns[p.id];
+              const status = pipelineStatus(run);
+              const sel    = selectedPipeline && String(selectedPipeline.id) === String(p.id);
               return (
-                <div key={p.id} onClick={() => setSelectedPipeline(allPipelines.find(x => String(x.id) === String(p.id)) || p)}
+                <div key={p.id}
+                  onClick={() => setSelectedPipeline(allPipelines.find(x => String(x.id) === String(p.id)) || p)}
                   style={{ display: "flex", alignItems: "center", padding: "8px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? `${T.amber}08` : "transparent" }}>
                   <Dot color={status.color} pulse={status.pulse} />
                   <span style={{ flex: 1, fontSize: 12 }}>{p.name}</span>
                   <span style={{ fontSize: 10, color: status.color, marginRight: 8 }}>{status.label}</span>
-                  <button onClick={(e) => { e.stopPropagation(); onTogglePin(p); }} style={{ background: "none", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: T.muted, fontSize: 11 }}>×</button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onTogglePin(p); }}
+                    style={{ background: "none", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: T.muted, fontSize: 11 }}>
+                    ×
+                  </button>
                 </div>
               );
             })}
@@ -122,16 +125,26 @@ export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
         </div>
         {filteredPipelines.slice(0, 50).map((p) => {
           const pinned = pinnedIds.has(String(p.id));
-          const run = getPipelineRun(p);
-          const status = getStatus(run);
-          const sel = selectedPipeline && String(selectedPipeline.id) === String(p.id);
+          const run    = getPipelineRun(p);
+          const status = pipelineStatus(run);
+          const sel    = selectedPipeline && String(selectedPipeline.id) === String(p.id);
           return (
             <div key={p.id} onClick={() => setSelectedPipeline(p)}
               style={{ display: "flex", alignItems: "center", padding: "8px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? `${T.amber}08` : "transparent" }}>
               {pinned && <Dot color={status.color} />}
               <span style={{ flex: 1, fontSize: 11, marginLeft: pinned ? 0 : 12 }}>{p.name}</span>
               <span style={{ fontSize: 10, color: T.dim, marginRight: 8 }}>{p._projectName}</span>
-              <button onClick={(e) => { e.stopPropagation(); onTogglePin({ id: p.id, name: p.name, _projectName: p._projectName, folder: p.folder, configuration: p.configuration }); }}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTogglePin({
+                    id: p.id,
+                    name: p.name,
+                    project: p._projectName || "",
+                    folder: p.folder || "",
+                    configurationType: p.configuration?.type || "",
+                  });
+                }}
                 style={{ background: pinned ? `${T.amber}18` : "rgba(255,255,255,0.04)", border: `1px solid ${pinned ? T.amber + "44" : "rgba(255,255,255,0.08)"}`, borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: pinned ? T.amber : T.dim, fontSize: 10 }}>
                 {pinned ? "✓" : "📌"}
               </button>
@@ -144,10 +157,11 @@ export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
 
   const renderDetail = () => {
     if (!selectedPipeline) return <div style={{ padding: 20, color: T.dim, textAlign: "center", marginTop: 50 }}>Select a pipeline</div>;
-    const run = getPipelineRun(selectedPipeline);
-    const status = getStatus(run);
-    const pinned = pinnedIds.has(String(selectedPipeline.id));
-    const projectName = selectedPipeline._projectName || pinnedPipelines.find(p => String(p.id) === String(selectedPipeline.id))?.project;
+    const run     = getPipelineRun(selectedPipeline);
+    const status  = pipelineStatus(run);
+    const pinned  = pinnedIds.has(String(selectedPipeline.id));
+    const projectName = selectedPipeline._projectName
+      || pinnedPipelines.find(p => String(p.id) === String(selectedPipeline.id))?.project;
     return (
       <div style={{ padding: 20 }}>
         <div style={{ marginBottom: 16 }}>
@@ -155,7 +169,14 @@ export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
           <div style={{ fontSize: 11, color: T.dim }}>{projectName}</div>
         </div>
         <div style={{ marginBottom: 16 }}>
-          <button onClick={() => onTogglePin({ id: selectedPipeline.id, name: selectedPipeline.name, _projectName: projectName, folder: selectedPipeline.folder, configuration: selectedPipeline.configuration })}
+          <button
+            onClick={() => onTogglePin({
+              id: selectedPipeline.id,
+              name: selectedPipeline.name,
+              project: projectName || "",
+              folder: selectedPipeline.folder || "",
+              configurationType: selectedPipeline.configuration?.type || "",
+            })}
             style={{ background: pinned ? `${T.amber}22` : "rgba(255,255,255,0.06)", border: `1px solid ${pinned ? T.amber + "44" : "rgba(255,255,255,0.15)"}`, borderRadius: 5, padding: "8px 16px", cursor: "pointer", color: pinned ? T.amber : T.muted, marginRight: 8 }}>
             {pinned ? "✓ Pinned" : "📌 Pin"}
           </button>
@@ -169,36 +190,30 @@ export function PipelinesView({ client, org, pinnedPipelines, onTogglePin }) {
         {run && (
           <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
             <div style={{ fontSize: 10, color: T.dim, marginBottom: 12, textTransform: "uppercase" }}>Latest Run</div>
-            <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-              <span style={{ width: 80, color: T.dim }}>Status</span>
-              <span style={{ color: status.color }}>{status.label}</span>
-            </div>
-            <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-              <span style={{ width: 80, color: T.dim }}>ID</span>
-              <span>{run.id}</span>
-            </div>
-            <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-              <span style={{ width: 80, color: T.dim }}>Started</span>
-              <span>{run.startTime ? new Date(run.startTime).toLocaleString() : "-"}</span>
-            </div>
-            <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-              <span style={{ width: 80, color: T.dim }}>Branch</span>
-              <span>{run.sourceBranch?.replace("refs/heads/", "") || "-"}</span>
-            </div>
+            {[
+              ["Status",  <span style={{ color: status.color }}>{status.label}</span>],
+              ["ID",      run.id],
+              ["Started", run.startTime ? new Date(run.startTime).toLocaleString() : "-"],
+              ["Branch",  branchName(run.sourceBranch) || "-"],
+            ].map(([label, val]) => (
+              <div key={label} style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                <span style={{ width: 80, color: T.dim }}>{label}</span>
+                <span>{val}</span>
+              </div>
+            ))}
           </div>
         )}
         <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
           <div style={{ fontSize: 10, color: T.dim, marginBottom: 12, textTransform: "uppercase" }}>Definition</div>
-          <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-            <span style={{ width: 80, color: T.dim }}>ID</span>
-            <span>{selectedPipeline.id}</span>
-          </div>
-          {selectedPipeline.folder && selectedPipeline.folder !== "\\" && (
-            <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-              <span style={{ width: 80, color: T.dim }}>Folder</span>
-              <span>{selectedPipeline.folder}</span>
+          {[
+            ["ID", selectedPipeline.id],
+            ...(selectedPipeline.folder && selectedPipeline.folder !== "\\" ? [["Folder", selectedPipeline.folder]] : []),
+          ].map(([label, val]) => (
+            <div key={label} style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+              <span style={{ width: 80, color: T.dim }}>{label}</span>
+              <span>{val}</span>
             </div>
-          )}
+          ))}
         </div>
       </div>
     );

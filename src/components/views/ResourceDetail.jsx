@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
-import { Pill, Dot, Spinner } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus } from "../../lib/wiUtils";
+import { Pill, Dot, Spinner, SelectableRow, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl } from "../../lib";
 
-export function ResourceDetail({ client, workItem, org, collection, onResourceToggle }) {
+export function ResourceDetail({ client, workItem, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
   const [repos,     setRepos]     = useState(null);
   const [pipelines, setPipelines] = useState(null);
   const [prs,       setPrs]       = useState(null);
@@ -52,28 +52,9 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
     { id: "tests",     label: "Test Runs",    count: tests?.length || 0 },
   ];
 
-  const isInCollection = (resourceType, id) => {
-    if (!collection) return false;
-    if (resourceType === "repo")     return collection.repoIds?.includes(String(id));
-    if (resourceType === "pipeline") return collection.pipelineIds?.includes(String(id));
-    if (resourceType === "pr")       return collection.prIds?.includes(String(id));
-    return false;
-  };
-
   const handleToggle = (resourceType, id) => {
     if (!collection || !onResourceToggle) return;
     onResourceToggle(resourceType, id, collection.id);
-  };
-
-  const ToggleBtn = ({ resourceType, id }) => {
-    const inCol = isInCollection(resourceType, id);
-    return (
-      <button onClick={() => handleToggle(resourceType, id)}
-        title={inCol ? "Remove from collection" : "Add to collection"}
-        style={{ background: inCol ? `${collection.color}18` : "rgba(255,255,255,0.04)", border: `1px solid ${inCol ? collection.color + "44" : "rgba(255,255,255,0.08)"}`, borderRadius: 4, padding: "6px 14px", cursor: "pointer", color: inCol ? collection.color : T.muted, fontSize: 12, fontFamily: "'Barlow'", fontWeight: 500 }}>
-        {inCol ? "✓ In Collection" : "+ Add to Collection"}
-      </button>
-    );
   };
 
   /* ── Details tab ────────────────────────────────────────────── */
@@ -86,7 +67,7 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
           <Pill label={state} color={stateColor(state)} />
           {areaPath && <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>↳ {areaPath}</span>}
         </div>
-        <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: "#F9FAFB", lineHeight: 1.2, letterSpacing: "0.02em", marginBottom: 8 }}>{title}</div>
+        <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: T.heading, lineHeight: 1.2, letterSpacing: "0.02em", marginBottom: 8 }}>{title}</div>
         {workItem.fields?.["System.AssignedTo"]?.displayName && (
           <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
             Assigned to {workItem.fields["System.AssignedTo"].displayName} · Changed {timeAgo(workItem.fields["System.ChangedDate"])}
@@ -156,19 +137,19 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", borderLeft: `2px solid ${isSel ? T.cyan : "transparent"}`, background: isSel ? `${T.cyan}08` : "transparent" }}
               onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.025)"; }}
               onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = "transparent"; }}>
-              <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", color: isInCollection("repo", r.id) ? collection?.color : T.cyan }}>{r.name}</span>
+              <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", color: isInCollection(collection, "repo", r.id) ? collection?.color : T.cyan }}>{r.name}</span>
             </div>
           );
         }}
         detail={selectedRepo ? (
           <>
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: "#F9FAFB", marginBottom: 8 }}>{selectedRepo.name}</div>
-              {collection && <ToggleBtn resourceType="repo" id={selectedRepo.id} />}
+              <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: T.heading, marginBottom: 8 }}>{selectedRepo.name}</div>
+              {collection && <ToggleBtn added={isInCollection(collection, "repo", selectedRepo.id)} color={collection.color} onClick={() => handleToggle("repo", selectedRepo.id)} />}
             </div>
             <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
               {[
-                ["Default Branch", selectedRepo.defaultBranch?.replace("refs/heads/", "") || "main"],
+                ["Default Branch", branchName(selectedRepo.defaultBranch) || "main"],
                 ["Size", selectedRepo.size ? `${(selectedRepo.size / 1024).toFixed(0)} KB` : "empty"],
                 ["URL", selectedRepo.remoteUrl || "—"],
                 ["Last Updated", timeAgo(selectedRepo.lastUpdatedTime)],
@@ -179,6 +160,16 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
                 </div>
               ))}
             </div>
+            {collection && onAddComment && (
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+                <CommentThread
+                  comments={(collection.repos || []).find(r => r.id === selectedRepo.id)?.comments || []}
+                  onAdd={(text) => onAddComment(collection.id, "repo", selectedRepo.id, text)}
+                  authorName={profile?.displayName || ""}
+                  disabled={syncStatus === "saving"}
+                />
+              </div>
+            )}
           </>
         ) : <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontSize: 13, fontFamily: "'Barlow'" }}>Select a repository</div>}
       />
@@ -201,7 +192,7 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
               onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.025)"; }}
               onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = "transparent"; }}>
               <Dot color={rs.color} pulse={rs.label === "running"} />
-              <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", color: isInCollection("pipeline", p.id) ? collection?.color : T.text }}>{p.name}</span>
+              <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", color: isInCollection(collection, "pipeline", p.id) ? collection?.color : T.text }}>{p.name}</span>
               <Pill label={rs.label} color={rs.color} />
             </div>
           );
@@ -209,8 +200,8 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
         detail={selectedPipeline ? (
           <>
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: "#F9FAFB", marginBottom: 8 }}>{selectedPipeline.name}</div>
-              {collection && <ToggleBtn resourceType="pipeline" id={selectedPipeline.id} />}
+              <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: T.heading, marginBottom: 8 }}>{selectedPipeline.name}</div>
+              {collection && <ToggleBtn added={isInCollection(collection, "pipeline", selectedPipeline.id)} color={collection.color} onClick={() => handleToggle("pipeline", selectedPipeline.id)} />}
             </div>
             <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
               {[
@@ -230,6 +221,16 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
                 </span>
               </div>
             </div>
+            {collection && onAddComment && (
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+                <CommentThread
+                  comments={(collection.pipelines || []).find(p => String(p.id) === String(selectedPipeline.id))?.comments || []}
+                  onAdd={(text) => onAddComment(collection.id, "pipeline", selectedPipeline.id, text)}
+                  authorName={profile?.displayName || ""}
+                  disabled={syncStatus === "saving"}
+                />
+              </div>
+            )}
           </>
         ) : <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: T.dim, fontSize: 13, fontFamily: "'Barlow'" }}>Select a pipeline</div>}
       />
@@ -239,40 +240,38 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
   /* ── PRs tab ────────────────────────────────────────────────── */
   const renderPRsTab = () => {
     const filtered = (prs || []).filter(pr => !prSearch || pr.title?.toLowerCase().includes(prSearch.toLowerCase()) || String(pr.pullRequestId).includes(prSearch));
-    const prColor = s => ({ active: T.cyan, completed: T.green, abandoned: T.muted }[s] || T.dim);
-    const prLabel = s => ({ active: "open", completed: "merged", abandoned: "closed" }[s] || s);
     return (
       <SplitPane
         search={prSearch} onSearch={setPRSearch} placeholder="Search pull requests..."
         loading={loading} items={filtered.slice(0, 20)}
         renderItem={pr => {
           const isSel = selectedPR?.pullRequestId === pr.pullRequestId;
-          const col = prColor(pr.status);
+          const status = prStatus(pr.status);
           return (
             <div key={pr.pullRequestId} onClick={() => setSelectedPR(pr)}
-              style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", borderLeft: `2px solid ${isSel ? col : "transparent"}`, background: isSel ? `${col}08` : "transparent" }}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", cursor: "pointer", borderLeft: `2px solid ${isSel ? status.color : "transparent"}`, background: isSel ? `${status.color}08` : "transparent" }}
               onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = "rgba(255,255,255,0.025)"; }}
               onMouseLeave={e => { if (!isSel) e.currentTarget.style.background = "transparent"; }}>
               <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", width: 30 }}>#{pr.pullRequestId}</span>
-              <span style={{ flex: 1, fontSize: 12, color: isInCollection("pr", pr.pullRequestId) ? collection?.color : T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pr.title}</span>
-              <Pill label={prLabel(pr.status)} color={col} />
+              <span style={{ flex: 1, fontSize: 12, color: isInCollection(collection, "pr", pr.pullRequestId) ? collection?.color : T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pr.title}</span>
+              <Pill label={status.label} color={status.color} />
             </div>
           );
         }}
         detail={selectedPR ? (
           <>
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: "#F9FAFB", marginBottom: 8 }}>{selectedPR.title}</div>
+              <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: T.heading, marginBottom: 8 }}>{selectedPR.title}</div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Pill label={prLabel(selectedPR.status)} color={prColor(selectedPR.status)} />
-                {collection && <ToggleBtn resourceType="pr" id={selectedPR.pullRequestId} />}
+                <Pill label={prStatus(selectedPR.status).label} color={prStatus(selectedPR.status).color} />
+                {collection && <ToggleBtn added={isInCollection(collection, "pr", selectedPR.pullRequestId)} onClick={() => handleToggle("pr", selectedPR.pullRequestId)} />}
               </div>
             </div>
             <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
               {[
                 ["Author",    selectedPR.createdBy?.displayName || "—"],
-                ["Source",    selectedPR.sourceRefName?.replace("refs/heads/", "") || "—"],
-                ["Target",    selectedPR.targetRefName?.replace("refs/heads/", "") || "—"],
+                ["Source",    branchName(selectedPR.sourceRefName) || "—"],
+                ["Target",    branchName(selectedPR.targetRefName) || "—"],
                 ["Created",   timeAgo(selectedPR.creationDate)],
                 ["Reviewers", String(selectedPR.reviewers?.length || 0)],
               ].map(([label, val]) => (
@@ -320,7 +319,7 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
         detail={selectedTest ? (
           <>
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: "#F9FAFB", marginBottom: 8 }}>{selectedTest.name}</div>
+              <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: T.heading, marginBottom: 8 }}>{selectedTest.name}</div>
               <Pill label={selectedTest.failedTests > 0 ? "failing" : "passing"} color={selectedTest.failedTests > 0 ? T.red : T.green} />
             </div>
             <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
@@ -355,13 +354,9 @@ export function ResourceDetail({ client, workItem, org, collection, onResourceTo
               <Pill label={state} color={stateColor(state)} />
               {areaPath && <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>↳ {areaPath}</span>}
             </div>
-            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: "#F9FAFB", lineHeight: 1.2, letterSpacing: "0.02em" }}>{title}</div>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: T.heading, lineHeight: 1.2, letterSpacing: "0.02em" }}>{title}</div>
           </div>
-          <a href={`https://dev.azure.com/${encodeURIComponent(org)}/_workitems/edit/${workItem.id}`}
-            target="_blank" rel="noreferrer"
-            style={{ background: `${T.amber}12`, border: `1px solid ${T.amber}33`, color: T.amber, padding: "6px 13px", borderRadius: 4, fontSize: 12, fontFamily: "'Barlow'", fontWeight: 500, textDecoration: "none", whiteSpace: "nowrap", marginTop: 2 }}>
-            Open in ADO ↗
-          </a>
+            <AdoLink href={workItemUrl(org, workItem.id)} />
         </div>
       </div>
 

@@ -1,18 +1,20 @@
 import { T } from "../../lib/theme";
+import { Field, AdoLink } from "../ui";
+import { isInCollection, timeAgo, branchName, workItemUrl } from "../../lib";
 
 export function SearchResultDetail({ result, collection, org, onWorkItemToggle, onResourceToggle }) {
   if (!result) return null;
   const { type, item } = result;
 
-  const inCol = () => {
+  const getInCollection = () => {
     if (!collection) return false;
-    if (type === "workitem") return (collection.workItemIds || []).includes(String(item.id));
-    if (type === "repo")     return (collection.repoIds || []).includes(String(item.id));
-    if (type === "pipeline") return (collection.pipelineIds || []).includes(String(item.id));
-    if (type === "pr")       return (collection.prIds || []).includes(String(item.pullRequestId));
+    if (type === "workitem") return isInCollection(collection, "workitem", item.id);
+    if (type === "repo")     return isInCollection(collection, "repo", item.id);
+    if (type === "pipeline") return isInCollection(collection, "pipeline", item.id);
+    if (type === "pr")       return isInCollection(collection, "pr", item.pullRequestId);
     return false;
   };
-  const added = inCol();
+  const added = getInCollection();
 
   const handleToggle = () => {
     if (!collection) return;
@@ -23,13 +25,6 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
   };
 
   const containerStyle = { flex: 1, overflowY: "auto", padding: 24 };
-
-  const Field = ({ label, value }) => (
-    <div style={{ display: "flex", gap: 12, padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
-      <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", minWidth: 110, flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: 12, color: T.text, wordBreak: "break-all" }}>{value || <span style={{ color: T.dimmer }}>—</span>}</span>
-    </div>
-  );
 
   const ToggleSection = () => (
     <div style={{ marginBottom: 16 }}>
@@ -54,7 +49,7 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
     const created  = f["System.CreatedDate"] ? new Date(f["System.CreatedDate"]).toLocaleDateString() : "";
     const tcMap    = { Bug: T.red, Epic: T.amber, Feature: T.purple, "User Story": T.blue, Task: T.cyan };
     const tc       = tcMap[wiType] || T.blue;
-    const adomUrl  = org ? `https://dev.azure.com/${org}/_workitems/edit/${item.id}` : null;
+    const adoUrl  = workItemUrl(org, item.id);
     return (
       <div style={containerStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -64,7 +59,7 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
         </div>
         <div style={{ fontSize: 17, fontWeight: 600, color: T.text, marginBottom: 14, lineHeight: 1.35 }}>{wiTitle}</div>
         <ToggleSection />
-        {adomUrl && <a href={adomUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: T.blue, textDecoration: "none", display: "inline-block", marginBottom: 18 }}>Open in ADO ↗</a>}
+        {adoUrl && <AdoLink href={adoUrl} />}
         <div>
           <Field label="State"       value={wiState} />
           <Field label="Type"        value={wiType} />
@@ -78,7 +73,7 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
 
   if (type === "repo") {
     const remoteUrl    = item.remoteUrl || item.sshUrl || "";
-    const defaultBranch = item.defaultBranch?.replace("refs/heads/", "") || "";
+    const defaultBranch = branchName(item.defaultBranch) || "";
     const size         = item.size != null ? `${Math.round(item.size / 1024)} KB` : "";
     return (
       <div style={containerStyle}>
@@ -116,9 +111,9 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
 
   if (type === "pr") {
     const author   = item.createdBy?.displayName || "";
-    const source   = item.sourceRefName?.replace("refs/heads/", "") || "";
-    const target   = item.targetRefName?.replace("refs/heads/", "") || "";
-    const created  = item.creationDate ? new Date(item.creationDate).toLocaleDateString() : "";
+    const source   = branchName(item.sourceRefName) || "";
+    const target   = branchName(item.targetRefName) || "";
+    const created  = timeAgo(item.creationDate);
     const reviewers = (item.reviewers || []).map(r => r.displayName || r.uniqueName).join(", ");
     const statusColor = s => ({ active: T.blue, completed: T.green, abandoned: T.red }[s] || T.muted);
     return (

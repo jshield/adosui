@@ -1,7 +1,40 @@
 import { T } from "../../lib/theme";
-import { Dot } from "../ui";
+import { Dot, UserAvatar, SectionLabel } from "../ui";
+import { PINNED_PIPELINES_ID } from "../../lib/adoStorage";
 
-export function Rail({ profile, org, collections, activeCol, activeView, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines }) {
+const SYNC_LABEL = {
+  idle:   null,
+  saving: { text: "Saving…",  color: T.amber },
+  saved:  { text: "Saved ✓",  color: T.green },
+  error:  { text: "Save failed", color: T.red },
+};
+
+export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines }) {
+  // Split into shared and personal, hiding the reserved pinned-pipelines collection
+  const shared   = collections.filter(c => c.scope !== "personal");
+  const personal = collections.filter(c => c.scope === "personal" && c.id !== PINNED_PIPELINES_ID);
+
+  const syncInfo = SYNC_LABEL[syncStatus] || null;
+
+  const renderCollection = (c) => (
+    <div key={c.id} onClick={() => onSelectCollection(c.id)}
+      style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 14px", cursor: "pointer", background: activeCol === c.id && activeView !== "pipelines" ? `${c.color}10` : "transparent", borderLeft: `2px solid ${activeCol === c.id && activeView !== "pipelines" ? c.color : "transparent"}`, transition: "all 0.12s" }}
+      onMouseEnter={e => { if (activeCol !== c.id) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+      onMouseLeave={e => { if (activeCol !== c.id) e.currentTarget.style.background = "transparent"; }}
+    >
+      <span style={{ fontSize: 15 }}>{c.icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: activeCol === c.id && activeView !== "pipelines" ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+      </div>
+      <Dot color={c.color} />
+      <button
+        onClick={e => { e.stopPropagation(); onSelectCollection(null, c.id); }}
+        style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", padding: "2px 5px", fontSize: 12, opacity: 0.4, lineHeight: 1 }}
+        title="Delete collection"
+      >×</button>
+    </div>
+  );
+
   return (
     <div style={{ width: 215, background: T.panel, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", flexShrink: 0 }}>
       {/* Header */}
@@ -9,9 +42,7 @@ export function Rail({ profile, org, collections, activeCol, activeView, onSelec
         <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 15, color: T.amber, letterSpacing: "0.05em", marginBottom: profile ? 8 : 2 }}>ADO SUPERUI</div>
         {profile ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.amber, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 13, color: "#000", flexShrink: 0 }}>
-              {(profile.displayName || "?")[0].toUpperCase()}
-            </div>
+            <UserAvatar profile={profile} />
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{profile.displayName}</div>
               <div style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1 }}>{profile.emailAddress}</div>
@@ -35,33 +66,38 @@ export function Rail({ profile, org, collections, activeCol, activeView, onSelec
       </div>
 
       {/* Collections list */}
-      <div style={{ flex: 1, overflowY: "auto", paddingTop: 10 }}>
-        <div style={{ padding: "0 14px 8px", fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", letterSpacing: "0.1em", textTransform: "uppercase" }}>Collections</div>
-        {collections.map(c => (
-          <div key={c.id} onClick={() => onSelectCollection(c.id)}
-            style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 14px", cursor: "pointer", background: activeCol === c.id && activeView !== "pipelines" ? `${c.color}10` : "transparent", borderLeft: `2px solid ${activeCol === c.id && activeView !== "pipelines" ? c.color : "transparent"}`, transition: "all 0.12s" }}
-            onMouseEnter={e => { if (activeCol !== c.id) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
-            onMouseLeave={e => { if (activeCol !== c.id) e.currentTarget.style.background = "transparent"; }}
-          >
-            <span style={{ fontSize: 15 }}>{c.icon}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: activeCol === c.id && activeView !== "pipelines" ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
-            </div>
-            <Dot color={c.color} />
-            <button
-              onClick={e => { e.stopPropagation(); onSelectCollection(null, c.id); }}
-              style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", padding: "2px 5px", fontSize: 12, opacity: 0.4, lineHeight: 1 }}
-              title="Delete collection"
-            >×</button>
-          </div>
-        ))}
-        {!collections.length && (
-          <div style={{ padding: "14px", fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", lineHeight: 1.6 }}>No collections.<br />Create one to begin.</div>
+      <div style={{ flex: 1, overflowY: "auto", paddingTop: 8 }}>
+
+        {/* SHARED section */}
+        <div style={{ padding: "6px 14px 4px", fontSize: 9, color: T.dim, fontFamily: "'JetBrains Mono'", letterSpacing: "0.12em", textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>Shared</span>
+          <span style={{ color: T.dimmer }}>{shared.length}</span>
+        </div>
+        {shared.map(renderCollection)}
+        {!shared.length && (
+          <div style={{ padding: "6px 14px 10px", fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>No shared collections.</div>
+        )}
+
+        {/* PERSONAL section */}
+        <div style={{ padding: "10px 14px 4px", fontSize: 9, color: T.violet, fontFamily: "'JetBrains Mono'", letterSpacing: "0.12em", textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${T.border}`, marginTop: 6 }}>
+          <span style={{ color: T.dim }}>Personal</span>
+          <span style={{ color: T.dimmer }}>{personal.length}</span>
+        </div>
+        {personal.map(renderCollection)}
+        {!personal.length && (
+          <div style={{ padding: "6px 14px 10px", fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>No personal collections.</div>
         )}
       </div>
 
       {/* Footer actions */}
       <div style={{ padding: "12px 14px", borderTop: `1px solid ${T.border}` }}>
+        {/* Sync status */}
+        {syncInfo && (
+          <div style={{ fontSize: 10, color: syncInfo.color, fontFamily: "'JetBrains Mono'", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: syncInfo.color, display: "inline-block" }} />
+            {syncInfo.text}
+          </div>
+        )}
         <div onClick={onNewCollection} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", opacity: 0.6, transition: "opacity 0.15s", marginBottom: 9 }}
           onMouseEnter={e => e.currentTarget.style.opacity = 1} onMouseLeave={e => e.currentTarget.style.opacity = 0.6}>
           <span style={{ color: T.amber, fontSize: 13 }}>＋</span>

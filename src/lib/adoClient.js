@@ -213,46 +213,209 @@ export class ADOClient {
   }
 
   async getProfile() {
-    return this._cachedFetch("profile", () =>
-      this._fetch(`https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.1`)
+    return this._cachedFetch("profile", async () => {
+      const r = await this._fetch(`${this.base}/_apis/connectionData?api-version=7.1-preview`);
+      const u = r.authenticatedUser;
+      if (!u) throw new Error("connectionData returned no authenticatedUser");
+      // Normalise to the shape the rest of the app expects
+      return {
+        id:           u.id,
+        displayName:  u.providerDisplayName || u.id,
+        emailAddress: u.properties?.Account?.$value || u.descriptor?.split("\\")[1] || "",
+      };
+    });
+  }
+
+  // ── Git repository API ────────────────────────────────────────────────────
+
+  /**
+   * List all repositories in a project.
+   * Returns the full ADO repository objects (id, name, remoteUrl, …).
+   */
+  async listReposInProject(project) {
+    const r = await this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories?api-version=7.1`
+    );
+    return r.value || [];
+  }
+
+  /**
+   * Resolve or verify a repository by name within a project.
+   * Returns the repo object if found, or null.
+   */
+  async getRepoByName(project, repoName) {
+    const repos = await this.listReposInProject(project);
+    return repos.find(r => r.name.toLowerCase() === repoName.toLowerCase()) || null;
+  }
+
+  /**
+   * Create a new Git repository in the specified project.
+   * Returns the created repository object.
+   */
+  async createRepo(project, repoName) {
+    const projectsResp = await this._fetch(`${this.base}/_apis/projects/${encodeURIComponent(project)}?api-version=7.1`);
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories?api-version=7.1`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name: repoName, project: { id: projectsResp.id } }),
+      }
     );
   }
 
-  _patHash() {
-    const enc = new TextEncoder().encode(this.pat);
-    return crypto.subtle.digest("SHA-256", enc).then(buf =>
-      Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("")
-    );
-  }
-
-  async loadCollections(profileId) {
+  /**
+   * List items (files/directories) at a given path in a Git repo.
+   * Returns an array of item objects with path, objectId, isFolder, etc.
+   */
+  async listGitItems(project, repoId, path = "/") {
     try {
-      const res = await fetch("/collections", {
+      const r = await this._fetch(
+        `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/items` +
+        `?scopePath=${encodeURIComponent(path)}&recursionLevel=OneLevel&api-version=7.1`
+      );
+      return r.value || [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Read the content of a single file from a Git repo.
+   * Returns { content: string, objectId: string } or null if not found.
+   */
+  async readGitFile(project, repoId, filePath) {
+    try {
+      const r = await this._fetch(
+        `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/items` +
+        `?path=${encodeURIComponent(filePath)}&includeContent=true&api-version=7.1`
+      );
+      // The items API returns the file content in r.content when includeContent=true
+      return { content: r.content || "", objectId: r.objectId || null };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Push a single file change (create, update, or delete) to a Git repo.
+   *
+   * @param {string} project       ADO project name
+   * @param {string} repoId        Repository ID (GUID)
+   * @param {string} filePath      Path in the repo, e.g. "/collections/shared/team.yaml"
+   * @param {string|null} content  File content (null to delete)
+   * @param {string|null} oldObjectId  Previous objectId for updates (null for new files)
+   * @param {string} commitMessage
+   * @param {string} authorName
+   * @param {string} authorEmail
+   * @returns {Promise<object>} The push response from ADO
+   */
+  async pushGitFile(project, repoId, filePath, content, oldObjectId, commitMessage, authorName, authorEmail) {
+    // Determine the branch's latest commit so we can push on top of it
+    const refsResp = await this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}` +
+      `/refs?filter=heads/main&api-version=7.1`
+    );
+    const refs = refsResp.value || [];
+    const mainRef = refs.find(r => r.name === "refs/heads/main") || refs[0];
+
+    // For brand-new repos the branch may not exist yet — use the null OID
+    const oldRefObjectId = mainRef ? mainRef.objectId : "0000000000000000000000000000000000000000";
+
+    // When no oldObjectId is supplied (new collection created in the browser),
+    // probe whether the file already exists so we use "edit" rather than "add"
+    // if a previous session already wrote it.
+    let resolvedOldObjectId = oldObjectId;
+    if (content !== null && !resolvedOldObjectId) {
+      const existing = await this.readGitFile(project, repoId, filePath);
+      if (existing?.objectId) resolvedOldObjectId = existing.objectId;
+    }
+
+    const changeType = content === null ? "delete" : (resolvedOldObjectId ? "edit" : "add");
+    const change = {
+      changeType,
+      item: { path: filePath },
+      ...(changeType !== "delete" ? { newContent: { content, contentType: "rawtext" } } : {}),
+    };
+
+    const now = new Date().toISOString();
+    const pushPayload = {
+      refUpdates: [{ name: "refs/heads/main", oldObjectId: oldRefObjectId }],
+      commits: [{
+        comment: commitMessage,
+        author: { name: authorName, email: authorEmail, date: now },
+        changes: [change],
+      }],
+    };
+
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pushes?api-version=7.1`,
+      { method: "POST", body: JSON.stringify(pushPayload) }
+    );
+  }
+
+  // ── Wiki API ──────────────────────────────────────────────────────────────
+
+  /**
+   * List all wikis in the organisation (optionally filtered to a project).
+   * Returns an array of wiki objects.
+   */
+  async listWikis(project) {
+    const url = project
+      ? `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis?api-version=7.1`
+      : `${this.base}/_apis/wiki/wikis?api-version=7.1`;
+    try {
+      const r = await this._fetch(url);
+      return r.value || [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Upsert (create or update) a wiki page.
+   * ADO Wiki PUT creates parent pages automatically.
+   *
+   * @param {string} project   ADO project name
+   * @param {string} wikiId    Wiki ID or name
+   * @param {string} pagePath  Page path, e.g. "ADO-SuperUI/Collections/Team Backend"
+   * @param {string} content   Markdown content
+   * @returns {Promise<object>} The wiki page response
+   */
+  async upsertWikiPage(project, wikiId, pagePath, content) {
+    const encodedPath = encodeURIComponent(pagePath);
+    // First try to get the current ETag (version) so we can update rather than conflict
+    let eTag = null;
+    try {
+      const getResp = await fetch(API_PROXY, {
         method: "GET",
-        headers: {
-          "Authorization": this._auth,
-          "X-Profile-Id": profileId,
-        },
+        headers: this._getHeaders({
+          targetUrl: `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${wikiId}/pages?path=${encodedPath}&api-version=7.1`,
+        }),
       });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return Array.isArray(data.collections) ? data.collections : null;
-    } catch { return null; }
-  }
+      if (getResp.ok) {
+        eTag = getResp.headers.get("ETag");
+      }
+    } catch { /* page doesn't exist yet — that's fine */ }
 
-  async saveCollections(profileId, collections) {
-    try {
-      const patHash = await this._patHash();
-      await fetch("/collections", {
-        method: "PUT",
-        headers: {
-          "Authorization": this._auth,
-          "Content-Type": "application/json",
-          "X-Profile-Id": profileId,
-          "X-Pat-Hash": patHash,
-        },
-        body: JSON.stringify({ collections }),
-      });
-    } catch { /* fire-and-forget */ }
+    const headers = {
+      ...this._getHeaders({
+        targetUrl: `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${wikiId}/pages?path=${encodedPath}&api-version=7.1`,
+      }),
+      "Content-Type": "application/json",
+    };
+    if (eTag) headers["If-Match"] = eTag;
+
+    const res = await fetch(API_PROXY, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ content }),
+    });
+
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
+      throw new Error(`Wiki upsert failed ${res.status}: ${msg}`);
+    }
+    return res.json();
   }
 }

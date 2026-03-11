@@ -1,6 +1,7 @@
 export { PipelinesView }                      from "./PipelinesView";
 export { FilterPanel, ALL_TYPES, ALL_STATES } from "./FilterPanel";
 export { ConnectScreen }                      from "./ConnectScreen";
+export { SetupScreen }                        from "./SetupScreen";
 export { CollectionBuilder }                  from "./CollectionBuilder";
 export { WorkItemPanel }                      from "./WorkItemPanel";
 export { CollectionDropdown }                 from "./CollectionDropdown";

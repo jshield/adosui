@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
+import { popoverStyle, SectionLabel } from "../ui";
 
 export function CollectionDropdown({ collections, currentIds, onToggle, onClose, buttonRef, onCreateNew }) {
   const [open, setOpen] = useState(false);
@@ -107,22 +108,16 @@ export function CollectionDropdown({ collections, currentIds, onToggle, onClose,
       id="collection-dropdown"
       role="listbox"
       style={{
-        position: "absolute",
+        ...popoverStyle,
         top: position.top,
         left: position.left,
         zIndex: 200,
-        background: T.panel,
-        border: `1px solid ${T.border}`,
-        borderRadius: 6,
         padding: 8,
         minWidth: 180,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
         marginTop: 2,
       }}
     >
-      <div style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 6, padding: "0 4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-        Add to collection
-      </div>
+      <SectionLabel>Add to collection</SectionLabel>
       {allItems.length === 0 ? (
         <div style={{ fontSize: 11, color: T.dim, padding: "8px 4px", fontFamily: "'JetBrains Mono'" }}>
           No collections yet

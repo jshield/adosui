@@ -2,31 +2,27 @@
 /**
  * ado-server.js
  * Unified server for ADO SuperUI:
- *   - Proxies ADO API requests on behalf of the browser (replaces ado-proxy.js)
- *   - Persists user collections server-side, keyed by ADO profile ID
+ *   - Proxies ADO API requests on behalf of the browser (CORS proxy)
+ *   - Collections are now stored in an ADO Git repository — no local persistence here
  *
  * Routes:
  *   OPTIONS  *               CORS preflight
  *   POST     /ado-proxy      Proxy a request to Azure DevOps (X-Target-URL header)
- *   GET      /collections    Fetch stored collections for the authenticated user
- *   PUT      /collections    Save collections for the authenticated user
  *   GET      /health         Liveness check
+ *   GET      /               Static SPA files + SPA fallback
  */
 
 import http   from 'node:http';
 import https  from 'node:https';
-import crypto from 'node:crypto';
 import path   from 'node:path';
 import fs     from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'ado-superui.db');
 const DIST_PATH = process.env.DIST_PATH || path.join(__dirname, 'dist');
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
@@ -47,35 +43,7 @@ const MIME_TYPES = {
   '.eot':  'application/vnd.ms-fontobject',
 };
 
-// ── SQLite setup (node:sqlite — built-in since Node 22, stable in Node 24) ───
-
-let db;
-try {
-  db = new DatabaseSync(DB_PATH);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      profile_id  TEXT PRIMARY KEY,
-      pat_hash    TEXT NOT NULL,
-      collections TEXT NOT NULL DEFAULT '[]',
-      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-  console.log(`[db] SQLite database at ${DB_PATH}`);
-} catch (err) {
-  console.error(`[db] Failed to open SQLite database: ${err.message}`);
-  process.exit(1);
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
-  });
-}
 
 function setCors(res, origin) {
   if (ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*')) {
@@ -83,7 +51,7 @@ function setCors(res, origin) {
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers',
-    'Authorization, Content-Type, Accept, X-Target-URL, X-Profile-Id, X-Pat-Hash');
+    'Authorization, Content-Type, Accept, X-Target-URL');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
 }
 
@@ -93,19 +61,15 @@ function json(res, status, body, origin) {
   res.end(JSON.stringify(body));
 }
 
-function serveStatic(req, res, origin) {
+function serveStatic(req, res) {
   let filePath = path.join(DIST_PATH, req.url.split('?')[0]);
 
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
+  if (!fs.existsSync(filePath)) return null;
 
   const stat = fs.statSync(filePath);
   if (stat.isDirectory()) {
     filePath = path.join(filePath, 'index.html');
-    if (!fs.existsSync(filePath)) {
-      return null;
-    }
+    if (!fs.existsSync(filePath)) return null;
   }
 
   const ext = path.extname(filePath);
@@ -113,10 +77,7 @@ function serveStatic(req, res, origin) {
 
   try {
     const content = fs.readFileSync(filePath);
-    res.writeHead(200, {
-      'Content-Type': contentType,
-      'Cache-Control': 'no-cache',
-    });
+    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
     res.end(content);
     return true;
   } catch (err) {
@@ -125,7 +86,7 @@ function serveStatic(req, res, origin) {
   }
 }
 
-function serveSpa(req, res, origin) {
+function serveSpa(res, origin) {
   const indexPath = path.join(DIST_PATH, 'index.html');
 
   if (!fs.existsSync(indexPath)) {
@@ -143,117 +104,6 @@ function serveSpa(req, res, origin) {
   }
 }
 
-// ── Persistence handlers ──────────────────────────────────────────────────────
-
-function handleGetCollections(req, res, origin) {
-  const profileId = req.headers['x-profile-id'];
-  if (!profileId) return json(res, 400, { error: 'Missing X-Profile-Id header' }, origin);
-
-  try {
-    const stmt = db.prepare('SELECT collections FROM users WHERE profile_id = ?');
-    const row  = stmt.get(profileId);
-    if (!row) return json(res, 200, { collections: [] }, origin);
-    return json(res, 200, { collections: JSON.parse(row.collections) }, origin);
-  } catch (err) {
-    console.error('[db] GET collections error:', err.message);
-    return json(res, 500, { error: 'Database error' }, origin);
-  }
-}
-
-async function handlePutCollections(req, res, origin) {
-  const profileId = req.headers['x-profile-id'];
-  const patHash   = req.headers['x-pat-hash'];
-
-  if (!profileId) return json(res, 400, { error: 'Missing X-Profile-Id header' }, origin);
-  if (!patHash)   return json(res, 400, { error: 'Missing X-Pat-Hash header' }, origin);
-
-  let body;
-  try {
-    const raw = await readBody(req);
-    body = JSON.parse(raw);
-  } catch {
-    return json(res, 400, { error: 'Invalid JSON body' }, origin);
-  }
-
-  const collections = body.collections;
-  if (!Array.isArray(collections)) {
-    return json(res, 400, { error: 'Body must have a "collections" array' }, origin);
-  }
-
-  try {
-    const collectionsJson = JSON.stringify(collections);
-    // Upsert: profile ID is the key; update pat_hash silently on rotation
-    const stmt = db.prepare(`
-      INSERT INTO users (profile_id, pat_hash, collections, updated_at)
-      VALUES (?, ?, ?, datetime('now'))
-      ON CONFLICT(profile_id) DO UPDATE SET
-        pat_hash    = excluded.pat_hash,
-        collections = excluded.collections,
-        updated_at  = datetime('now')
-    `);
-    stmt.run(profileId, patHash, collectionsJson);
-    return json(res, 200, { ok: true }, origin);
-  } catch (err) {
-    console.error('[db] PUT collections error:', err.message);
-    return json(res, 500, { error: 'Database error' }, origin);
-  }
-}
-
-async function handleCollectionsAction(req, res, origin, action) {
-  const profileId = req.headers['x-profile-id'];
-  const patHash   = req.headers['x-pat-hash'];
-
-  if (action === 'get-collections') {
-    if (!profileId) return json(res, 400, { error: 'Missing X-Profile-Id header' }, origin);
-    try {
-      const stmt = db.prepare('SELECT collections FROM users WHERE profile_id = ?');
-      const row  = stmt.get(profileId);
-      if (!row) return json(res, 200, { collections: [] }, origin);
-      return json(res, 200, { collections: JSON.parse(row.collections) }, origin);
-    } catch (err) {
-      console.error('[db] get-collections error:', err.message);
-      return json(res, 500, { error: 'Database error' }, origin);
-    }
-  }
-
-  if (action === 'save-collections') {
-    if (!profileId) return json(res, 400, { error: 'Missing X-Profile-Id header' }, origin);
-    if (!patHash)   return json(res, 400, { error: 'Missing X-Pat-Hash header' }, origin);
-
-    let body;
-    try {
-      const raw = await readBody(req);
-      body = JSON.parse(raw);
-    } catch {
-      return json(res, 400, { error: 'Invalid JSON body' }, origin);
-    }
-
-    const collections = body.collections;
-    if (!Array.isArray(collections)) {
-      return json(res, 400, { error: 'Body must have a "collections" array' }, origin);
-    }
-
-    try {
-      const collectionsJson = JSON.stringify(collections);
-      const stmt = db.prepare(`
-        INSERT INTO users (profile_id, pat_hash, collections, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
-        ON CONFLICT(profile_id) DO UPDATE SET
-          pat_hash    = excluded.pat_hash,
-          collections = excluded.collections,
-          updated_at  = datetime('now')
-      `);
-      stmt.run(profileId, patHash, collectionsJson);
-      return json(res, 200, { ok: true }, origin);
-    } catch (err) {
-      console.error('[db] save-collections error:', err.message);
-      return json(res, 500, { error: 'Database error' }, origin);
-    }
-  }
-
-  return json(res, 404, { error: 'Unknown action' }, origin);
-}
-
 // ── ADO proxy handler ─────────────────────────────────────────────────────────
 
 async function handleProxy(req, res, origin) {
@@ -262,16 +112,10 @@ async function handleProxy(req, res, origin) {
     return json(res, 400, { error: 'Missing X-Target-URL header' }, origin);
   }
 
-  // Check for internal actions first
-  if (targetUrl.includes('save-collections') || targetUrl.includes('get-collections')) {
-    const action = targetUrl.includes('save-collections') ? 'save-collections' : 'get-collections';
-    return handleCollectionsAction(req, res, origin, action);
-  }
-
   const isHttps  = targetUrl.startsWith('https://');
   const upstream = isHttps ? https : http;
 
-  // Forward everything except hop-by-hop / routing headers
+  // Forward everything except hop-by-hop / routing headers.
   // Strip accept-encoding so ADO returns plain JSON (not gzip) — the proxy
   // pipes the body as-is and drops Content-Encoding, which would cause the
   // browser to receive compressed bytes it can't decode.
@@ -280,19 +124,16 @@ async function handleProxy(req, res, origin) {
   delete forwardHeaders['origin'];
   delete forwardHeaders['referer'];
   delete forwardHeaders['x-target-url'];
-  delete forwardHeaders['x-profile-id'];
-  delete forwardHeaders['x-pat-hash'];
   delete forwardHeaders['accept-encoding'];
 
   const options = { method: req.method, headers: forwardHeaders };
 
   const proxyReq = upstream.request(targetUrl, options, (proxyRes) => {
     res.writeHead(proxyRes.statusCode, {
-      'Content-Type': 'application/json',
+      'Content-Type': proxyRes.headers['content-type'] || 'application/json',
       'Access-Control-Allow-Origin': origin || '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers':
-        'Authorization, Content-Type, Accept, X-Target-URL, X-Profile-Id, X-Pat-Hash',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, X-Target-URL',
       'Access-Control-Allow-Credentials': 'true',
     });
     proxyRes.pipe(res);
@@ -326,13 +167,6 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, ts: new Date().toISOString() }, origin);
   }
 
-  // Persistence routes
-  if (url === '/collections') {
-    if (req.method === 'GET') return handleGetCollections(req, res, origin);
-    if (req.method === 'PUT') return handlePutCollections(req, res, origin);
-    return json(res, 405, { error: 'Method not allowed' }, origin);
-  }
-
   // ADO proxy route — explicit path
   if (url === '/ado-proxy') {
     return handleProxy(req, res, origin);
@@ -344,26 +178,21 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Try static files first
-  if (serveStatic(req, res, origin)) {
-    return;
-  }
+  if (serveStatic(req, res)) return;
 
   // SPA fallback for client-side routing
-  if (serveSpa(req, res, origin)) {
-    return;
-  }
+  if (serveSpa(res, origin)) return;
 
   return json(res, 404, { error: 'Not found' }, origin);
 });
 
 server.on('listening', () => {
-  console.log(`ADO Server running on http://127.0.0.1:${PORT}`);
-  console.log(`  Proxy:       POST /ado-proxy  (legacy: any path with X-Target-URL)`);
-  console.log(`  Collections: GET|PUT /collections`);
-  console.log(`  Health:      GET /health`);
-  console.log(`  Static:      GET / (serves SPA from ${DIST_PATH})`);
-  console.log(`  DB:          ${DB_PATH}`);
-  console.log(`  Origins:     ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`ADO SuperUI server running on http://127.0.0.1:${PORT}`);
+  console.log(`  Proxy:   POST /ado-proxy  (legacy: any path with X-Target-URL)`);
+  console.log(`  Health:  GET /health`);
+  console.log(`  Static:  GET / (serves SPA from ${DIST_PATH})`);
+  console.log(`  Origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`  Storage: ADO Git repository (configured per-user at setup time)`);
 });
 
 server.on('error', (err) => {
