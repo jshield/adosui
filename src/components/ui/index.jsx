@@ -1,4 +1,4 @@
-import { T } from "../lib/theme";
+import { T } from "../../lib/theme";
 
 export const Pill = ({ label, color }) => (
   <span style={{ 
@@ -65,3 +65,31 @@ export const Spinner = ({ size = 16 }) => (
     animation: "spin 0.7s linear infinite" 
   }} />
 );
+
+export const Btn = ({ children, onClick, variant = "ghost", disabled }) => {
+  const s = {
+    primary: { background: `${T.amber}18`, border: `1px solid ${T.amber}44`, color: T.amber },
+    ghost:   { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: T.muted },
+  }[variant];
+  return <button disabled={disabled} onClick={onClick} style={{ ...s, padding: "7px 16px", borderRadius: 5, cursor: disabled ? "not-allowed" : "pointer", fontSize: 12, fontFamily: "'Barlow'", fontWeight: 500, opacity: disabled ? 0.5 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>{children}</button>;
+};
+
+export function ProxyBanner({ status }) {
+  if (status === "ok") return null;
+  const isChecking = status === "checking";
+  return (
+    <div style={{ background: isChecking ? `${T.dim}22` : `${T.red}12`, border: `1px solid ${isChecking ? T.dim : T.red}44`, borderRadius: 6, padding: "10px 16px", marginBottom: 20, display: "flex", alignItems: "center", gap: 10 }}>
+      {isChecking ? <Spinner size={13} /> : <span style={{ color: T.red }}>⚠</span>}
+      <div>
+        <div style={{ fontSize: 12, color: isChecking ? T.muted : T.red, fontWeight: 500 }}>
+          {isChecking ? "Checking proxy…" : "Local proxy not reachable"}
+        </div>
+        {!isChecking && (
+          <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginTop: 3 }}>
+            Run <code style={{ color: T.amber, background: "rgba(245,158,11,0.08)", padding: "1px 5px", borderRadius: 3 }}>node ado-proxy.js</code> in a terminal, then retry.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

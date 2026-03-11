@@ -1,6 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { PipelinesView } from "./components/views/PipelinesView";
 
+// Import extracted components (can be used to replace inline definitions)
+import { FilterPanel as ExtractedFilterPanel } from "./components/views/FilterPanel";
+import { ConnectScreen as ExtractedConnectScreen } from "./components/views/ConnectScreen";
+import { CollectionBuilder as ExtractedCollectionBuilder } from "./components/views/CollectionBuilder";
+import { WorkItemPanel as ExtractedWorkItemPanel } from "./components/views/WorkItemPanel";
+
 /* ─── LOCAL STORAGE HOOK ─────────────────────────────────────── */
 function useLocalStorage(key, initial) {
   const [value, setValue] = useState(() => {
