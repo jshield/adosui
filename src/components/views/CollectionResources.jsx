@@ -17,6 +17,7 @@ export function CollectionResources({
   const [repos,      setRepos]      = useState([]);
   const [pipelines,  setPipelines]  = useState([]);
   const [prs,        setPrs]        = useState([]);
+  const [serviceConnections, setServiceConnections] = useState([]);
   const [wikiPages, setWikiPages] = useState([]);
   const [loading,    setLoading]    = useState(true);
 
