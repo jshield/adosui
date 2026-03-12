@@ -124,3 +124,24 @@ export const getRunStatusVal = (run) => {
   if (Array.isArray(run)) run = run[0] || null;
   return (run && (run.result || run.state || run.status)) || "";
 };
+
+/* ── Group runs by branch and return arrays sorted newest-first ── */
+export const getLatestPerBranch = (runs = []) => {
+  const map = {};
+  if (!Array.isArray(runs)) return map;
+  for (const r of runs) {
+    if (!r) continue;
+    const br = getRunBranch(r) || "unknown";
+    map[br] = map[br] || [];
+    map[br].push(r);
+  }
+  // Sort each branch list newest-first
+  for (const [k, arr] of Object.entries(map)) {
+    arr.sort((a, b) => {
+      const ta = new Date(a.startTime || a.queueTime || 0).getTime();
+      const tb = new Date(b.startTime || b.queueTime || 0).getTime();
+      return tb - ta;
+    });
+  }
+  return map;
+};

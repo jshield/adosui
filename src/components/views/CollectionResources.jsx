@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Pill, Dot, Card, Spinner, CommentThread } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, pipelineStatus, prStatus, branchName } from "../../lib";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, pipelineStatus, prStatus, branchName, getLatestRun, getRunBranch, getRunStatusVal } from "../../lib";
 
 export function CollectionResources({
   client,
@@ -181,7 +181,9 @@ export function CollectionResources({
             )} />
 
             <Group title="Pipelines" items={pipelines} renderItem={p => {
-              const rs = pipelineStatus(p.latestRun?.result || p.latestRun?.state);
+              const runObj = getLatestRun((cache.get(`project:${p._projectName}:pipelineRuns`) || {})[String(p.id)] || p.latestRun || null) || null;
+              const rs = pipelineStatus(getRunStatusVal(runObj));
+              const branch = getRunBranch(runObj) || branchName(p.latestRun?.sourceBranch || p.latestRun?.sourceRefName || p.latestRun?.repository?.refName) || "";
               return (
                 <div key={p.id} style={{ marginBottom: 8 }}>
                   <Card accent={rs.color}>
@@ -192,6 +194,7 @@ export function CollectionResources({
                           <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.text }}>{p.name}</span>
                           <Pill label={rs.label} color={rs.color} />
                         </div>
+                        <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginTop: 6 }}>{branch}</div>
                         {onAddComment && (
                           <CommentThread
                             comments={getPipelineComments(p.id)}

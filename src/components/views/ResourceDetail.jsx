@@ -2,7 +2,7 @@ import { marked } from "marked";
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, pipelineUrl, serviceConnectionUrl, wikiPageUrl, repoUrl, prUrl } from "../../lib";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, pipelineUrl, serviceConnectionUrl, wikiPageUrl, repoUrl, prUrl, getLatestRun, getRunBranch, getRunStatusVal, getLatestPerBranch } from "../../lib";
 
 // Configure marked with custom renderer for v17 API
 const renderer = new marked.Renderer();
@@ -316,12 +316,7 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
     );
   };
 
-  const runsByBranch = runs.reduce((acc, run) => {
-    const branch = getRunBranch(run);
-    if (!acc[branch]) acc[branch] = [];
-    acc[branch].push(run);
-    return acc;
-  }, {});
+  const runsByBranch = getLatestPerBranch(runs || []);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -372,16 +367,17 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
             <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>
               <Spinner /> Loading...
             </div>
-          ) : Object.keys(runsByBranch).length > 0 ? (
+            ) : Object.keys(runsByBranch).length > 0 ? (
             Object.entries(runsByBranch).map(([branch, branchRuns]) => {
-              const latest = branchRuns[0];
-              const st = pipelineStatus(latest.result || latest.state);
+              const latest = getLatestRun(branchRuns);
+              const st = pipelineStatus(getRunStatusVal(latest));
+              const branchLabel = getRunBranch(latest) || branch;
               return (
                 <div key={branch} style={{ display: "flex", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branch}</span>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branchLabel}</span>
                   <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, fontFamily: "'JetBrains Mono'" }}>
                     <Pill label={st.label} color={st.color} />
-                    <span style={{ color: T.dim, fontSize: 11 }}>{timeAgo(latest.startTime || latest.queueTime)}</span>
+                    <span style={{ color: T.dim, fontSize: 11 }}>{timeAgo(latest?.startTime || latest?.queueTime)}</span>
                   </span>
                 </div>
               );
