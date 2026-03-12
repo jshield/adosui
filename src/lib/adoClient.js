@@ -243,6 +243,52 @@ export class ADOClient {
     return r.value || [];
   }
 
+  /**
+   * Fetch builds for multiple definition IDs in one request and return a
+   * mapping of definitionId -> latest build (or null).
+   * We request a larger $top so the response includes several recent builds
+   * across the given definitions, then pick the most recent per definition.
+   */
+  async getBuildRunsForDefinitions(project, definitionIds = [], perDefinition = 5) {
+    if (!definitionIds || !definitionIds.length) return {};
+    const defs = definitionIds.map(String).join(",");
+    const top = Math.max(5, definitionIds.length * perDefinition);
+    try {
+      const r = await this._fetch(
+        `${this.base}/${encodeURIComponent(project)}/_apis/build/builds?definitions=${encodeURIComponent(defs)}&$top=${top}&api-version=7.1`
+      );
+      const builds = r.value || [];
+      // Group by definition id and pick the latest by queueTime/startTime
+      const byDef = {};
+      for (const b of builds) {
+        const defId = b.definition?.id || (b.definition && b.definition.id) || null;
+        if (!defId) continue;
+        const key = String(defId);
+        if (!byDef[key]) byDef[key] = [];
+        byDef[key].push(b);
+      }
+      const result = {};
+      for (const id of definitionIds) {
+        const key = String(id);
+        const arr = byDef[key] || [];
+        if (!arr.length) {
+          result[key] = null;
+          continue;
+        }
+        // Sort by startTime/queueTime desc
+        arr.sort((a, b) => {
+          const ta = new Date(a.startTime || a.queueTime || 0).getTime();
+          const tb = new Date(b.startTime || b.queueTime || 0).getTime();
+          return tb - ta;
+        });
+        result[key] = arr[0];
+      }
+      return result;
+    } catch (e) {
+      return definitionIds.reduce((acc, id) => (acc[String(id)] = null, acc), {});
+    }
+  }
+
   async getPullRequests(project) {
     const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/git/pullrequests?searchCriteria.status=active&$top=30&api-version=7.1`);
     return r.value || [];

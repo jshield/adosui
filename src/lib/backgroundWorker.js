@@ -160,39 +160,49 @@ class BackgroundWorker {
       cache.set(keyPrefix + "pipelines", pipelines, CACHE_TTL);
     } catch (e) {}
 
-    // Fetch latest run for each pipeline (limited concurrency)
+    // Fetch latest run for each pipeline using a batched builds call.
     try {
       const runsMap = {};
-      const pipelineFetchers = (await (async () => {
-        try { return await this.client.getPipelines(projectName); } catch { return []; }
-      })()).map(pl => async () => {
-        try {
-          // Prefer the builds endpoint because it reliably includes repository
-          // and branch information needed by the UI. Fall back to pipeline
-          // runs if builds returns nothing.
-          let runs = [];
-          try {
-            runs = await this.client.getBuildRuns(projectName, pl.id);
-          } catch (e) {
-            // ignore and try pipeline runs below
-          }
-          if (!runs || runs.length === 0) {
-            try {
-              runs = await this.client.getPipelineRuns(projectName, pl.id);
-            } catch (e) {
-              runs = [];
-            }
-          }
-          runsMap[pl.id] = (runs && runs[0]) || null;
-        } catch (e) {
-          runsMap[pl.id] = null;
-        }
-      });
-
-      for (let i = 0; i < pipelineFetchers.length; i += BATCH_SIZE) {
-        const chunk = pipelineFetchers.slice(i, i + BATCH_SIZE).map(fn => fn());
-        await Promise.all(chunk);
+      let pipelines = [];
+      try {
+        pipelines = await this.client.getPipelines(projectName);
+      } catch (e) {
+        pipelines = [];
       }
+
+      if (pipelines.length) {
+        // Batch definition IDs into chunks to reduce requests
+        const defIds = pipelines.map(p => p.id);
+        const CHUNK_DEFS = 20;
+        for (let i = 0; i < defIds.length; i += CHUNK_DEFS) {
+          const chunk = defIds.slice(i, i + CHUNK_DEFS);
+          try {
+            const map = await this.client.getBuildRunsForDefinitions(projectName, chunk, 5);
+            // map: definitionId -> latest build or null
+            Object.assign(runsMap, map);
+          } catch (e) {
+            // On failure, mark these ids as null and continue
+            for (const id of chunk) runsMap[String(id)] = null;
+          }
+        }
+
+        // For any definitions with no builds returned, fall back to pipeline runs
+        const missing = Object.keys(runsMap).filter(k => !runsMap[k]);
+        if (missing.length) {
+          for (let i = 0; i < missing.length; i += BATCH_SIZE) {
+            const chunk = missing.slice(i, i + BATCH_SIZE);
+            await Promise.all(chunk.map(async (defId) => {
+              try {
+                const r = await this.client.getPipelineRuns(projectName, defId);
+                runsMap[defId] = (r && r[0]) || null;
+              } catch (e) {
+                runsMap[defId] = null;
+              }
+            }));
+          }
+        }
+      }
+
       cache.set(keyPrefix + "pipelineRuns", runsMap, RUNS_TTL);
       this.lastPipelineRunsRefresh = new Date().toISOString();
     } catch (e) {
