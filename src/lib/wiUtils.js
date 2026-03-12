@@ -94,3 +94,7 @@ export const wikiPageUrl = (org, project, wikiId, pagePath) => {
   const pathPart = pagePath ? `%2F${encodeURIComponent(pagePath.replace(/^\//, "").replace(/\//g, "%2F"))}` : "";
   return `https://dev.azure.com/${encodeURIComponent(org)}${projPart}/_wiki/wikis/${encodeURIComponent(wikiId)}${pathPart ? `?path=${pathPart}` : ""}`;
 };
+
+export const repoUrl = (org, project, repoName) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_git/${encodeURIComponent(repoName)}`;
+
+export const prUrl = (org, project, pullRequestId) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_git/pullrequests/${pullRequestId}`;

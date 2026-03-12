@@ -2,7 +2,7 @@ import { marked } from "marked";
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, serviceConnectionUrl, wikiPageUrl } from "../../lib";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, pipelineUrl, serviceConnectionUrl, wikiPageUrl, repoUrl, prUrl } from "../../lib";
 
 // Configure marked with custom renderer for v17 API
 const renderer = new marked.Renderer();
@@ -91,10 +91,10 @@ export function ResourceDetail({ client, resource, org, collection, profile, onR
     return <WorkItemDetail client={client} workItem={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   if (type === "repo") {
-    return <RepoDetail client={client} repo={data} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+    return <RepoDetail client={client} repo={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   if (type === "pipeline") {
-    return <PipelineDetail client={client} pipeline={data} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+    return <PipelineDetail client={client} pipeline={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   if (type === "pr") {
     return <PRDetail client={client} pr={data} collection={collection} org={org} profile={profile} onResourceToggle={onResourceToggle} syncStatus={syncStatus} />;
@@ -211,7 +211,7 @@ function WorkItemDetail({ client, workItem, org, collection, profile, onResource
   );
 }
 
-function RepoDetail({ client, repo, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+function RepoDetail({ client, repo, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
   const handleToggle = () => {
     if (!collection || !onResourceToggle) return;
     onResourceToggle("repo", repo.id, collection.id);
@@ -227,7 +227,10 @@ function RepoDetail({ client, repo, collection, profile, onResourceToggle, onAdd
               {branchName(repo.defaultBranch) || "main"} branch
             </div>
           </div>
-          {collection && <ToggleBtn added={isInCollection(collection, "repo", repo.id)} color={collection.color} onClick={handleToggle} />}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {org && repo._projectName && <AdoLink href={repoUrl(org, repo._projectName, repo.name)} />}
+            {collection && <ToggleBtn added={isInCollection(collection, "repo", repo.id)} color={collection.color} onClick={handleToggle} />}
+          </div>
         </div>
       </div>
 
@@ -260,13 +263,36 @@ function RepoDetail({ client, repo, collection, profile, onResourceToggle, onAdd
   );
 }
 
-function PipelineDetail({ client, pipeline, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+function PipelineDetail({ client, pipeline, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
   const rs = pipelineStatus(pipeline.latestRun?.result || pipeline.latestRun?.state);
 
   const handleToggle = () => {
     if (!collection || !onResourceToggle) return;
     onResourceToggle("pipeline", pipeline.id, collection.id);
   };
+
+  const [runs, setRuns] = useState([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!pipeline?._projectName || !pipeline?.id) return;
+    setRunsLoading(true);
+    const configType = pipeline.configuration?.type || "yaml";
+    const fetch = configType === "yaml"
+      ? client.getPipelineRuns(pipeline._projectName, pipeline.id)
+      : client.getBuildRuns(pipeline._projectName, pipeline.id);
+    fetch
+      .then(r => setRuns(r || []))
+      .catch(() => setRuns([]))
+      .finally(() => setRunsLoading(false));
+  }, [pipeline, client]);
+
+  const runsByBranch = runs.reduce((acc, run) => {
+    const branch = branchName(run.sourceBranch) || "unknown";
+    if (!acc[branch]) acc[branch] = [];
+    acc[branch].push(run);
+    return acc;
+  }, {});
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -282,7 +308,10 @@ function PipelineDetail({ client, pipeline, collection, profile, onResourceToggl
               {pipeline.folder || "/"} · Last run: {timeAgo(pipeline.latestRun?.startTime)}
             </div>
           </div>
-          {collection && <ToggleBtn added={isInCollection(collection, "pipeline", pipeline.id)} color={collection.color} onClick={handleToggle} />}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {org && pipeline._projectName && <AdoLink href={pipelineUrl(org, pipeline._projectName, pipeline.id)} />}
+            {collection && <ToggleBtn added={isInCollection(collection, "pipeline", pipeline.id)} color={collection.color} onClick={handleToggle} />}
+          </div>
         </div>
       </div>
 
@@ -305,6 +334,34 @@ function PipelineDetail({ client, pipeline, collection, profile, onResourceToggl
             </span>
           </div>
         </div>
+
+        <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
+          <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Runs by Branch
+          </div>
+          {runsLoading ? (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>
+              <Spinner /> Loading...
+            </div>
+          ) : Object.keys(runsByBranch).length > 0 ? (
+            Object.entries(runsByBranch).map(([branch, branchRuns]) => {
+              const latest = branchRuns[0];
+              const st = pipelineStatus(latest.result || latest.state);
+              return (
+                <div key={branch} style={{ display: "flex", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branch}</span>
+                  <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, fontFamily: "'JetBrains Mono'" }}>
+                    <Pill label={st.label} color={st.color} />
+                    <span style={{ color: T.dim, fontSize: 11 }}>{timeAgo(latest.startTime || latest.queueTime)}</span>
+                  </span>
+                </div>
+              );
+            })
+          ) : (
+            <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No runs found</div>
+          )}
+        </div>
+
         {collection && onAddComment && (
           <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
             <CommentThread
@@ -342,7 +399,10 @@ function PRDetail({ client, pr, collection, org, profile, onResourceToggle, sync
               {pr.createdBy?.displayName} · {branchName(pr.sourceRefName)} → {branchName(pr.targetRefName)}
             </div>
           </div>
-          {collection && <ToggleBtn added={isInCollection(collection, "pr", pr.pullRequestId)} onClick={handleToggle} />}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {org && pr._projectName && <AdoLink href={prUrl(org, pr._projectName, pr.pullRequestId)} />}
+            {collection && <ToggleBtn added={isInCollection(collection, "pr", pr.pullRequestId)} onClick={handleToggle} />}
+          </div>
         </div>
       </div>
 

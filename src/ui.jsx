@@ -555,6 +555,10 @@ export default function App() {
               org={org}
               pinnedCollection={pinnedCollection}
               onTogglePin={handleTogglePin}
+              profile={profile}
+              onResourceToggle={handleResourceToggle}
+              onAddComment={handleAddComment}
+              syncStatus={syncStatus}
             />
           </div>
         ) : (
@@ -568,7 +572,7 @@ export default function App() {
                   searchQuery={searchQuery}
                   collection={collection}
                   selectedResult={selectedSearchResult}
-                  onSelect={r => { setSelectedSearchResult(r); setSelectedWI(null); setSelectedResource(null); setView("resources"); }}
+                  onSelect={r => { setSelectedResource({ type: r.type, data: r.item }); setSelectedSearchResult(r); setSelectedWI(null); setView("resources"); }}
                   onWorkItemToggle={handleWorkItemToggle}
                   onResourceToggle={handleResourceToggle}
                 />

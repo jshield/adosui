@@ -26,7 +26,13 @@ class BackgroundWorker {
   async loadProjects() {
     if (!this.client) return;
     try {
-      this.projects = await this.client.getProjects();
+      const incoming = await this.client.getProjects();
+      // Reset rotation index when the project list changes
+      const names = p => p.map(x => x.id).join(",");
+      if (names(incoming) !== names(this.projects)) {
+        this.currentIndex = 0;
+      }
+      this.projects = incoming;
       if (this.currentIndex >= this.projects.length) {
         this.currentIndex = 0;
       }
@@ -62,15 +68,15 @@ class BackgroundWorker {
     return () => this.listeners.delete(callback);
   }
 
-  start() {
+  async start() {
     if (this.isRunning) return;
     this.isRunning = true;
-    this.loadProjects();
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
-    this.tick();
-    this.intervalId = setInterval(() => this.tick(), TICK_INTERVAL);
     this.log("Background worker started");
     this.notify();
+    await this.loadProjects();
+    this.tick();
+    this.intervalId = setInterval(() => this.tick(), TICK_INTERVAL);
   }
 
   stop() {
@@ -102,12 +108,13 @@ class BackgroundWorker {
 
   getBatch() {
     if (!this.projects.length) return [];
+    const count = Math.min(BATCH_SIZE, this.projects.length);
     const batch = [];
-    for (let i = 0; i < BATCH_SIZE; i++) {
+    for (let i = 0; i < count; i++) {
       const idx = (this.currentIndex + i) % this.projects.length;
       batch.push(this.projects[idx]);
     }
-    this.currentIndex = (this.currentIndex + BATCH_SIZE) % this.projects.length;
+    this.currentIndex = (this.currentIndex + count) % this.projects.length;
     return batch;
   }
 

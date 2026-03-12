@@ -153,7 +153,11 @@ export class ADOClient {
       if (!this._projects.length) await this.getProjects();
       const all = [];
       for (const p of this._projects.slice(0, 10)) {
-        try { all.push(...await this.getRepos(p.name)); } catch {}
+        try { 
+          const repos = await this.getRepos(p.name);
+          repos.forEach(repo => { repo._projectName = p.name; });
+          all.push(...repos); 
+        } catch {}
       }
       return all;
     });
@@ -181,7 +185,11 @@ export class ADOClient {
       if (!this._projects.length) await this.getProjects();
       const all = [];
       for (const p of this._projects.slice(0, 10)) {
-        try { all.push(...await this.getPullRequests(p.name)); } catch {}
+        try { 
+          const prs = await this.getPullRequests(p.name);
+          prs.forEach(pr => { pr._projectName = p.name; });
+          all.push(...prs); 
+        } catch {}
       }
       return all;
     });
