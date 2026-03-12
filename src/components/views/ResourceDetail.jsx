@@ -371,9 +371,14 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
 
   // Fetch content on demand when wiki page changes
   useEffect(() => {
-    if (wikiPage?._wikiId && wikiPage?.path) {
+    if (wikiPage?._wikiId && (wikiPage?.path || wikiPage?._pageId)) {
       setIsLoading(true);
-      client.getWikiPageContent(wikiPage._wikiId, wikiPage.path, wikiPage._projectName || wikiPage.project)
+      client.getWikiPageContent(
+        wikiPage._wikiId, 
+        wikiPage.path, 
+        wikiPage._projectName || wikiPage.project,
+        wikiPage._pageId  // Use API-provided numeric page ID if available
+      )
         .then(setContent)
         .catch(() => setContent(""))
         .finally(() => setIsLoading(false));

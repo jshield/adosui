@@ -451,11 +451,14 @@ export class ADOClient {
 
   // Helper to recursively flatten wiki pages hierarchy
   flattenWikiPages(page, wikiId, wikiName, projectName) {
-    // Always use composite ID (wikiId:path) for consistency and uniqueness
-    const pageId = `${wikiId}:${page.path}`;
+    // Use composite ID (wikiId:path) for collection membership
+    // Store original API page ID for content fetching
+    const compositeId = `${wikiId}:${page.path}`;
+    const apiPageId = page.id;  // Original numeric ID from API
     const result = [{
       ...page,
-      id: pageId,
+      id: compositeId,
+      _pageId: apiPageId,
       _wikiId: wikiId,
       _wikiName: wikiName,
       _projectName: projectName,
@@ -527,10 +530,17 @@ export class ADOClient {
     }
   }
 
-  async getWikiPageContent(wikiId, pagePath, projectName) {
+  async getWikiPageContent(wikiId, pagePath, projectName, apiPageId) {
     try {
       const projectPart = projectName ? `${encodeURIComponent(projectName)}/` : "";
-      const url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages?path=${encodeURIComponent(pagePath)}&includeContent=true&api-version=7.1`;
+      let url;
+      if (apiPageId) {
+        // Use page ID endpoint: /pages/{pageId}
+        url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages/${encodeURIComponent(apiPageId)}?includeContent=true&api-version=7.1`;
+      } else {
+        // Use path endpoint: /pages?path={path}
+        url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages?path=${encodeURIComponent(pagePath)}&includeContent=true&api-version=7.1`;
+      }
       const r = await this._fetch(url);
       return r.content || "";
     } catch {
