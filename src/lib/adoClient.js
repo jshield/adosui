@@ -451,8 +451,8 @@ export class ADOClient {
 
   // Helper to recursively flatten wiki pages hierarchy
   flattenWikiPages(page, wikiId, wikiName, projectName) {
-    // Generate a unique ID using wikiId + path (since API doesn't always return id)
-    const pageId = page.id || `${wikiId}:${page.path}`;
+    // Always use composite ID (wikiId:path) for consistency and uniqueness
+    const pageId = `${wikiId}:${page.path}`;
     const result = [{
       ...page,
       id: pageId,
