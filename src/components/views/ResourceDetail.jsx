@@ -287,8 +287,22 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
       .finally(() => setRunsLoading(false));
   }, [pipeline, client]);
 
+  // Normalize branch extraction from a run by checking multiple possible fields
+  const getRunBranch = (run) => {
+    if (!run) return "unknown";
+    return (
+      branchName(run.sourceBranch) ||
+      branchName(run.sourceRefName) ||
+      branchName(run.triggerInfo?.sourceBranch) ||
+      branchName(run.triggerInfo?.prSourceBranch) ||
+      branchName(run.resources?.repositories?.self?.refName) ||
+      branchName(run.repository?.defaultBranch) ||
+      "unknown"
+    );
+  };
+
   const runsByBranch = runs.reduce((acc, run) => {
-    const branch = branchName(run.sourceBranch) || "unknown";
+    const branch = getRunBranch(run);
     if (!acc[branch]) acc[branch] = [];
     acc[branch].push(run);
     return acc;

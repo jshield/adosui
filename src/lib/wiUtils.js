@@ -39,12 +39,18 @@ export const timeAgo = d => {
 
 /* ── Pipeline run status ──────────────────────────────────────── */
 export const pipelineStatus = r => {
-  const l = (r || "").toLowerCase();
+  // Accept either a status string or a run object. For run objects look for
+  // common fields where ADO returns status/result values.
+  let v = r;
+  if (r && typeof r === "object") {
+    v = r.result || r.state || r.status || "";
+  }
+  const l = (v || "").toString().toLowerCase();
   if (l === "succeeded") return { color: T.green, label: "passing" };
   if (l === "failed")    return { color: T.red,   label: "failing" };
   if (l === "running" || l === "inprogress") return { color: T.amber, label: "running" };
-  if (l === "canceled")  return { color: T.muted, label: "cancelled" };
-  return { color: T.dim, label: r || "unknown" };
+  if (l === "canceled" || l === "cancelled")  return { color: T.muted, label: "cancelled" };
+  return { color: T.dim, label: v || "unknown" };
 };
 
 /* ── Branch name cleaning ──────────────────────────────────────── */

@@ -101,8 +101,11 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
               </button>
             </div>
             {pinnedPipelines.map((p) => {
-              const run    = pipelineRuns[p.id];
-              const status = pipelineStatus(run);
+               const run    = pipelineRuns[p.id];
+               // For run objects, pipelineStatus now accepts the object, but
+               // prefer extracting a status string when available to keep labels
+               // consistent.
+               const status = pipelineStatus(run?.result || run?.state || run?.status || run);
               const sel    = selectedPipeline && String(selectedPipeline.id) === String(p.id);
               return (
                 <div key={p.id}
@@ -125,9 +128,9 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
           All Pipelines ({filteredPipelines.length})
         </div>
         {filteredPipelines.slice(0, 50).map((p) => {
-          const pinned = pinnedIds.has(String(p.id));
-          const run    = getPipelineRun(p);
-          const status = pipelineStatus(run);
+           const pinned = pinnedIds.has(String(p.id));
+           const run    = getPipelineRun(p);
+           const status = pipelineStatus(run?.result || run?.state || run?.status || run);
           const sel    = selectedPipeline && String(selectedPipeline.id) === String(p.id);
           return (
             <div key={p.id} onClick={() => setSelectedPipeline(p)}
