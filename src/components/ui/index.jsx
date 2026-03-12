@@ -216,7 +216,7 @@ export const ToggleBtn = ({ added, color = T.amber, onClick, label }) => (
       gap: 4,
     }}
   >
-    {added ? "✓" : "+"} {label || (added ? "In Collection" : "Add to Collection")}
+    {label || (added ? "In Collection" : "Add to Collection")}
   </button>
 );
 
