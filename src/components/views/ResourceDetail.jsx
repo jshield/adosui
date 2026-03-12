@@ -362,6 +362,7 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
   const path = wikiPage.path || wikiPage.name || "/";
 
   const [content, setContent] = useState("");
+  const [renderedContent, setRenderedContent] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   const handleToggle = (resourceType, id) => {
@@ -369,75 +370,85 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
     onResourceToggle(resourceType, id, collection.id);
   };
 
-  // Fetch content on demand when wiki page changes
-  useEffect(() => {
-    if (wikiPage?._wikiId && (wikiPage?.path || wikiPage?._pageId)) {
-      setIsLoading(true);
-      client.getWikiPageContent(
-        wikiPage._wikiId, 
-        wikiPage.path, 
-        wikiPage._projectName || wikiPage.project,
-        wikiPage._pageId  // Use API-provided numeric page ID if available
-      )
-        .then(setContent)
-        .catch(() => setContent(""))
-        .finally(() => setIsLoading(false));
-    }
-  }, [wikiPage, client]);
-
-  // Custom renderer for markdown to match theme
-  const renderMarkdown = (text) => {
-    const renderer = new marked.Renderer();
-    
-    // Style headings to match theme
-    renderer.heading = (text, level) => {
-      const fontSize = level === 1 ? 20 : level === 2 ? 18 : 16;
-      return `<h${level} style="color: ${T.text}; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: ${fontSize}px; margin: 16px 0 8px 0;">${text}</h${level}>`;
-    };
-    
-    // Style paragraphs
-    renderer.paragraph = (text) => `<p style="color: ${T.muted}; margin: 12px 0; line-height: 1.6;">${text}</p>`;
-    
-    // Style inline code
-    renderer.codespan = (code) => `<code style="color: ${T.cyan}; background: rgba(255,255,255,0.06); font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 3px;">${code}</code>`;
-    
-    // Style code blocks
-    renderer.code = (code, language) => `<pre style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 12px; overflow-x: auto; margin: 12px 0;"><code style="font-family: 'JetBrains Mono', monospace; color: ${T.text};">${code}</code></pre>`;
-    
-    // Style links
-    renderer.link = (href, title, text) => `<a href="${href}" style="color: ${T.blue}; text-decoration: underline;" ${title ? `title="${title}"` : ""}>${text}</a>`;
-    
-    // Style blockquotes
-    renderer.blockquote = (quote) => `<blockquote style="border-left: 3px solid ${T.amber}; padding-left: 16px; margin: 12px 0; color: ${T.dim};">${quote}</blockquote>`;
-    
-    // Style lists
-    renderer.list = (body, ordered) => {
-      const tag = ordered ? "ol" : "ul";
-      return `<${tag} style="margin: 12px 0; padding-left: 20px; color: ${T.muted};">${body}</${tag}>`;
-    };
-    
-    // Style list items
-    renderer.listitem = (text) => `<li style="margin: 4px 0; color: ${T.muted};">${text}</li>`;
-    
-    // Style horizontal rules
-    renderer.hr = () => `<hr style="border: none; border-top: 1px solid ${T.border}; margin: 24px 0;" />`;
-    
-    // Style tables
-    renderer.table = (header, body) => `<table style="border-collapse: collapse; width: 100%; margin: 12px 0;"><thead>${header}</thead><tbody>${body}</tbody></table>`;
-    renderer.tablerow = (content) => `<tr style="border-bottom: 1px solid ${T.border};">${content}</tr>`;
-    renderer.tablecell = (content, flags) => {
-      const tag = flags.header ? "th" : "td";
-      return `<${tag} style="padding: 8px 12px; text-align: ${flags.align || "left"}; color: ${T.text};">${content}</${tag}>`;
-    };
-    
-    marked.setOptions({
-      renderer: renderer,
-      gfm: true,
-      breaks: true
-    });
-    
-    return marked.parse(text);
+  // Setup marked renderer
+  const renderer = new marked.Renderer();
+  
+  // Style headings to match theme
+  renderer.heading = (text, level) => {
+    const fontSize = level === 1 ? 20 : level === 2 ? 18 : 16;
+    return `<h${level} style="color: ${T.text}; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: ${fontSize}px; margin: 16px 0 8px 0;">${text}</h${level}>`;
   };
+  
+  // Style paragraphs
+  renderer.paragraph = (text) => `<p style="color: ${T.muted}; margin: 12px 0; line-height: 1.6;">${text}</p>`;
+  
+  // Style inline code
+  renderer.codespan = (code) => `<code style="color: ${T.cyan}; background: rgba(255,255,255,0.06); font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 3px;">${code}</code>`;
+  
+  // Style code blocks
+  renderer.code = (code, language) => `<pre style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 12px; overflow-x: auto; margin: 12px 0;"><code style="font-family: 'JetBrains Mono', monospace; color: ${T.text};">${code}</code></pre>`;
+  
+  // Style links
+  renderer.link = (href, title, text) => `<a href="${href}" style="color: ${T.blue}; text-decoration: underline;" ${title ? `title="${title}"` : ""}>${text}</a>`;
+  
+  // Style blockquotes
+  renderer.blockquote = (quote) => `<blockquote style="border-left: 3px solid ${T.amber}; padding-left: 16px; margin: 12px 0; color: ${T.dim};">${quote}</blockquote>`;
+  
+  // Style lists
+  renderer.list = (body, ordered) => {
+    const tag = ordered ? "ol" : "ul";
+    return `<${tag} style="margin: 12px 0; padding-left: 20px; color: ${T.muted};">${body}</${tag}>`;
+  };
+  
+  // Style list items
+  renderer.listitem = (text) => `<li style="margin: 4px 0; color: ${T.muted};">${text}</li>`;
+  
+  // Style horizontal rules
+  renderer.hr = () => `<hr style="border: none; border-top: 1px solid ${T.border}; margin: 24px 0;" />`;
+  
+  // Style tables
+  renderer.table = (header, body) => `<table style="border-collapse: collapse; width: 100%; margin: 12px 0;"><thead>${header}</thead><tbody>${body}</tbody></table>`;
+  renderer.tablerow = (content) => `<tr style="border-bottom: 1px solid ${T.border};">${content}</tr>`;
+  renderer.tablecell = (content, flags) => {
+    const tag = flags.header ? "th" : "td";
+    return `<${tag} style="padding: 8px 12px; text-align: ${flags.align || "left"}; color: ${T.text};">${content}</${tag}>`;
+  };
+  
+  marked.setOptions({
+    renderer: renderer,
+    gfm: true,
+    breaks: true
+  });
+
+  // Fetch and render content on demand when wiki page changes
+  useEffect(() => {
+    const fetchAndRender = async () => {
+      if (wikiPage?._wikiId && (wikiPage?.path || wikiPage?._pageId)) {
+        setIsLoading(true);
+        try {
+          const markdown = await client.getWikiPageContent(
+            wikiPage._wikiId, 
+            wikiPage.path, 
+            wikiPage._projectName || wikiPage.project,
+            wikiPage._pageId
+          );
+          setContent(markdown);
+          if (markdown) {
+            const html = await marked.parse(markdown);
+            setRenderedContent(html);
+          } else {
+            setRenderedContent("");
+          }
+        } catch {
+          setContent("");
+          setRenderedContent("");
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+    fetchAndRender();
+  }, [wikiPage, client]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -476,7 +487,7 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
             <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
               <Spinner size={24} />
             </div>
-          ) : content ? (
+          ) : renderedContent ? (
             <div 
               style={{
                 color: T.text,
@@ -484,7 +495,7 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
                 lineHeight: 1.6,
                 fontFamily: "'Barlow', sans-serif",
               }}
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+              dangerouslySetInnerHTML={{ __html: renderedContent }}
             />
           ) : (
             <div style={{ color: T.dim, fontSize: 12, textAlign: "center", padding: 20 }}>
