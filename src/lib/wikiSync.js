@@ -116,6 +116,25 @@ function prsTable(prIds, org) {
   ].join("\n");
 }
 
+function wikiPagesTable(wikiPages, org) {
+  if (!wikiPages?.length) return "";
+  const rows = wikiPages.map(wp => {
+    const pathCell = escMd(wp.path || wp.name || "/");
+    const wikiCell = escMd(wp.wikiName || "");
+    const projectCell = escMd(wp.project || "");
+    const note = latestComment(wp.comments);
+    return `| ${pathCell} | ${wikiCell} | ${projectCell} | ${note} |`;
+  });
+  return [
+    "## Wiki Pages",
+    "",
+    "| Page Path | Wiki | Project | Notes |",
+    "|-----------|------|---------|-------|",
+    ...rows,
+    "",
+  ].join("\n");
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
@@ -140,6 +159,7 @@ export function generateWikiPage(collection, org) {
     reposTable(collection.repos, org),
     pipelinesTable(collection.pipelines, org),
     prsTable(collection.prIds, org),
+    wikiPagesTable(collection.wikiPages, org),
   ].filter(s => s !== undefined);
 
   return sections.join("\n");

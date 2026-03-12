@@ -79,6 +79,9 @@ export const isInCollection = (collection, type, id) => {
   if (type === "serviceconnection") {
     return (collection.serviceConnections || []).some(sc => String(sc.id) === sid);
   }
+  if (type === "wiki") {
+    return (collection.wikiPages || []).some(wp => String(wp.id) === sid);
+  }
   return false;
 };
 
@@ -86,3 +89,8 @@ export const isInCollection = (collection, type, id) => {
 export const workItemUrl = (org, id) => `https://dev.azure.com/${encodeURIComponent(org)}/_workitems/edit/${id}`;
 export const pipelineUrl = (org, project, id) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_build?definitionId=${id}`;
 export const serviceConnectionUrl = (org, project, id) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_settings/adminservices?resourceId=${id}`;
+export const wikiPageUrl = (org, project, wikiId, pagePath) => {
+  const projPart = project ? `/${encodeURIComponent(project)}` : "";
+  const pathPart = pagePath ? `%2F${encodeURIComponent(pagePath.replace(/^\//, "").replace(/\//g, "%2F"))}` : "";
+  return `https://dev.azure.com/${encodeURIComponent(org)}${projPart}/_wiki/wikis/${encodeURIComponent(wikiId)}${pathPart ? `?path=${pathPart}` : ""}`;
+};

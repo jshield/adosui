@@ -17,7 +17,7 @@ export function CollectionResources({
   const [repos,      setRepos]      = useState([]);
   const [pipelines,  setPipelines]  = useState([]);
   const [prs,        setPrs]        = useState([]);
-  const [serviceConnections, setServiceConnections] = useState([]);
+  const [wikiPages, setWikiPages] = useState([]);
   const [loading,    setLoading]    = useState(true);
 
   // Derive the repo/pipeline/service connection IDs from the structured objects
@@ -25,6 +25,7 @@ export function CollectionResources({
   const pipelineIds = (collection.pipelines || []).map(p => String(p.id));
   const prIds       = collection.prIds || [];
   const serviceConnectionIds = (collection.serviceConnections || []).map(sc => String(sc.id));
+  const wikiPageIds = (collection.wikiPages || []).map(wp => String(wp.id));
 
   useEffect(() => {
     setLoading(true);
@@ -49,16 +50,21 @@ export function CollectionResources({
         ? client.getAllServiceConnections().then(all => all.filter(sc => serviceConnectionIds.includes(String(sc.id))))
         : Promise.resolve([]);
 
-      const [wi, r, p, pr, scs] = await Promise.allSettled([wiPromise, reposPromise, pipesPromise, prsPromise, scsPromise]);
+      const wikiPromise = wikiPageIds.length > 0
+        ? client.getAllWikiPages().then(all => all.filter(wp => wikiPageIds.includes(String(wp.id))))
+        : Promise.resolve([]);
+
+      const [wi, r, p, pr, scs, wikis] = await Promise.allSettled([wiPromise, reposPromise, pipesPromise, prsPromise, scsPromise, wikiPromise]);
       setWorkItems(         wi.status === "fulfilled" ? wi.value : []);
       setRepos(             r.status  === "fulfilled" ? r.value  : []);
       setPipelines(         p.status  === "fulfilled" ? p.value  : []);
       setPrs(               pr.status === "fulfilled" ? pr.value : []);
       setServiceConnections(scs.status === "fulfilled" ? scs.value : []);
+      setWikiPages(         wikis.status === "fulfilled" ? wikis.value : []);
       setLoading(false);
     };
     fetchData();
-  }, [collection.id, JSON.stringify(repoIds), JSON.stringify(pipelineIds), JSON.stringify(prIds), JSON.stringify(serviceConnectionIds), collection.workItemIds?.join(",")]);
+  }, [collection.id, JSON.stringify(repoIds), JSON.stringify(pipelineIds), JSON.stringify(prIds), JSON.stringify(serviceConnectionIds), JSON.stringify(wikiPageIds), collection.workItemIds?.join(",")]);
 
   const removeItem = (type, id) => {
     if (type === "workitem") onWorkItemToggle(collection.id, id);
@@ -89,7 +95,7 @@ export function CollectionResources({
   const getPipelineComments = (id) => (collection.pipelines || []).find(p => String(p.id) === String(id))?.comments || [];
   const getServiceConnectionComments = (id) => (collection.serviceConnections || []).find(sc => String(sc.id) === String(id))?.comments || [];
 
-  const empty = workItems.length === 0 && repos.length === 0 && pipelines.length === 0 && prs.length === 0 && serviceConnections.length === 0;
+  const empty = workItems.length === 0 && repos.length === 0 && pipelines.length === 0 && prs.length === 0 && serviceConnections.length === 0 && wikiPages.length === 0;
   const authorName = profile?.displayName || "";
 
   return (
@@ -253,7 +259,34 @@ export function CollectionResources({
                 </Card>
               </div>
             )
-	    }/>
+          }/>
+
+            <Group title="Wiki Pages" items={wikiPages} renderItem={wp => {
+              const path = wp.path || wp.name || "/";
+              return (
+                <div key={wp.id} style={{ marginBottom: 8 }}>
+                  <Card accent={T.green}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.text }}>{path}</span>
+                          {wp.wikiName && <Pill label={wp.wikiName} color={T.green} />}
+                        </div>
+                        {onAddComment && (
+                          <CommentThread
+                            comments={(collection.wikiPages || []).find(wpItem => String(wpItem.id) === String(wp.id))?.comments || []}
+                            onAdd={(text) => onAddComment(collection.id, "wiki", wp.id, text)}
+                            authorName={authorName}
+                            disabled={syncStatus === "saving"}
+                          />
+                        )}
+                      </div>
+                      <RemoveBtn type="wiki" id={wp.id} />
+                    </div>
+                  </Card>
+                </div>
+              );
+            }} />
 
             {empty && (
               <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'", textAlign: "center", padding: 40 }}>

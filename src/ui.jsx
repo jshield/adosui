@@ -259,6 +259,11 @@ export default function App() {
         const exists = scs.some(sc => String(sc.id) === rid);
         return { ...c, serviceConnections: exists ? scs.filter(sc => String(sc.id) !== rid) : [...scs, { id: rid, project: "", type: "", comments: [] }] };
       }
+      if (type === "wiki") {
+        const wps = c.wikiPages || [];
+        const exists = wps.some(wp => String(wp.id) === rid);
+        return { ...c, wikiPages: exists ? wps.filter(wp => String(wp.id) !== rid) : [...wps, { id: rid, path: "", wikiId: "", wikiName: "", project: "", comments: [] }] };
+      }
       return c;
     });
   }, [updateCollection]);
@@ -299,6 +304,16 @@ export default function App() {
             String(sc.id) === String(resourceId)
               ? { ...sc, comments: [...(sc.comments || []), comment] }
               : sc
+          ),
+        };
+      }
+      if (resourceType === "wiki") {
+        return {
+          ...c,
+          wikiPages: (c.wikiPages || []).map(wp =>
+            String(wp.id) === String(resourceId)
+              ? { ...wp, comments: [...(wp.comments || []), comment] }
+              : wp
           ),
         };
       }
@@ -370,12 +385,13 @@ export default function App() {
     setSearching(true);
     try {
       const lower = q.toLowerCase();
-      const [wi, repos, pipelines, prs, scs] = await Promise.allSettled([
+      const [wi, repos, pipelines, prs, scs, wikis] = await Promise.allSettled([
         client.searchWorkItems(q, {}),
         client.getAllRepos(),
         client.getAllPipelines(),
         client.getAllPullRequests(),
         client.getAllServiceConnections(),
+        client.getAllWikiPages(),
       ]);
       setSearchResults({
         workItems:         wi.status === "fulfilled" ? wi.value.slice(0, 20) : [],
@@ -383,6 +399,7 @@ export default function App() {
         pipelines:         pipelines.status === "fulfilled" ? pipelines.value.filter(p => p.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
         prs:               prs.status === "fulfilled" ? prs.value.filter(pr => pr.title?.toLowerCase().includes(lower)).slice(0, 20) : [],
         serviceConnections: scs.status === "fulfilled" ? scs.value.filter(sc => sc.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
+        wikiPages:         wikis.status === "fulfilled" ? wikis.value.filter(wp => (wp.path || "").toLowerCase().includes(lower) || (wp.name || "").toLowerCase().includes(lower)).slice(0, 20) : [],
       });
     } catch (e) {
       console.error("Search error:", e);

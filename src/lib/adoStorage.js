@@ -101,6 +101,17 @@ export function migrateCollection(raw) {
     );
   }
 
+  // Migrate wikiPages
+  if (!Array.isArray(col.wikiPages)) {
+    col.wikiPages = [];
+  } else {
+    col.wikiPages = col.wikiPages.map(wp =>
+      typeof wp === "string"
+        ? { id: wp, path: "", wikiId: "", wikiName: "", project: "", comments: [] }
+        : { comments: [], ...wp }
+    );
+  }
+
   // Remove legacy flat arrays to keep the YAML clean
   delete col.repoIds;
   delete col.pipelineIds;
@@ -143,6 +154,14 @@ function serialise(collection) {
       project:     sc.project || "",
       type:        sc.type || "",
       comments:    sc.comments || [],
+    })),
+    wikiPages: (collection.wikiPages || []).map(wp => ({
+      id:         String(wp.id),
+      path:       wp.path || "",
+      wikiId:     wp.wikiId || "",
+      wikiName:   wp.wikiName || "",
+      project:    wp.project || "",
+      comments:   wp.comments || [],
     })),
   };
 }
@@ -303,6 +322,7 @@ export class ADOStorage {
       pipelines: [],
       prIds:    [],
       serviceConnections: [],
+      wikiPages: [],
     };
   }
 }

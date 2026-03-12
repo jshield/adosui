@@ -10,7 +10,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
     return <EmptyState icon="🔍" message="Type to search all resources" />;
   }
 
-  const total = results.workItems.length + results.repos.length + results.pipelines.length + results.prs.length + results.serviceConnections.length;
+  const total = results.workItems.length + results.repos.length + results.pipelines.length + results.prs.length + results.serviceConnections.length + results.wikiPages.length;
   if (total === 0) {
     return <EmptyState icon="∅" message={`No results for "${searchQuery}"`} />;
   }
@@ -140,6 +140,32 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                     onClick={e => { e.stopPropagation(); onResourceToggle("serviceconnection", sc.id, collection.id); }}
                     style={{ background: isInCollection(collection, "serviceconnection", sc.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "serviceconnection", sc.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "serviceconnection", sc.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
                   >{isInCollection(collection, "serviceconnection", sc.id) ? "✓" : "+"}</button>
+                )}
+              </SelectableRow>
+            );
+          })}
+        </>
+      )}
+
+      {results.wikiPages.length > 0 && (
+        <>
+          <SectionLabel count={results.wikiPages.length}>WIKI PAGES</SectionLabel>
+          {results.wikiPages.map(wp => {
+            const sel = isSelected("wiki", wp.id);
+            const displayPath = wp.path || wp.name || "/";
+            const wikiLabel = wp._wikiName || wp.wikiName || "";
+            return (
+              <SelectableRow key={wp.id} sel={sel} onClick={() => onSelect({ type: "wiki", item: wp })}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: T.green, fontFamily: "'JetBrains Mono'", background: `${T.green}22`, borderRadius: 3, padding: "1px 5px", flexShrink: 0 }}>WIKI</span>
+                  <span style={{ fontSize: 12, flex: 1, color: T.green, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayPath}</span>
+                  <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>{wikiLabel}</span>
+                </div>
+                {collection && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onResourceToggle("wiki", wp.id, collection.id); }}
+                    style={{ background: isInCollection(collection, "wiki", wp.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "wiki", wp.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "wiki", wp.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
+                  >{isInCollection(collection, "wiki", wp.id) ? "✓" : "+"}</button>
                 )}
               </SelectableRow>
             );

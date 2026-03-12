@@ -448,4 +448,78 @@ export class ADOClient {
     }
     return res.json();
   }
+
+  async getWikiPagesForProject(project) {
+    try {
+      const wikis = await this.listWikis(project);
+      const allPages = [];
+      for (const wiki of wikis) {
+        try {
+          const url = `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${wiki.id}/pages?api-version=7.1&recursionLevel=1`;
+          const r = await this._fetch(url);
+          const pages = (r.value || []).map(p => ({
+            ...p,
+            _wikiId: wiki.id,
+            _wikiName: wiki.name,
+            _projectName: project,
+          }));
+          allPages.push(...pages);
+        } catch { /* skip wikis we can't access */ }
+      }
+      return allPages;
+    } catch {
+      return [];
+    }
+  }
+
+  async getAllWikiPages(forceRefresh = false) {
+    if (forceRefresh) cache.invalidate("wiki-pages-");
+    return this._cachedFetch("wiki-pages-all", async () => {
+      const allPages = [];
+      let wikis = [];
+      try {
+        wikis = await this.listWikis();
+      } catch { /* org-level wikis may not exist */ }
+      for (const wiki of wikis) {
+        try {
+          const url = `${this.base}/_apis/wiki/wikis/${wiki.id}/pages?api-version=7.1&recursionLevel=1`;
+          const r = await this._fetch(url);
+          const pages = (r.value || []).map(p => ({
+            ...p,
+            _wikiId: wiki.id,
+            _wikiName: wiki.name,
+            _projectName: "",
+          }));
+          allPages.push(...pages);
+        } catch { /* skip wikis we can't access */ }
+      }
+      if (!this._projects.length) await this.getProjects();
+      for (const p of this._projects.slice(0, 20)) {
+        try {
+          const projPages = await this.getWikiPagesForProject(p.name);
+          allPages.push(...projPages);
+        } catch { /* skip projects we can't access */ }
+      }
+      return allPages;
+    });
+  }
+
+  async getWikiPageComments(wikiId, pageId) {
+    try {
+      const url = `${this.base}/_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages/${encodeURIComponent(pageId)}/comments?$top=50&excludeDeleted=true&$expand=9&api-version=7.1`;
+      const r = await this._fetch(url);
+      return r.value || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async addWikiPageComment(wikiId, pageId, text) {
+    const url = `${this.base}/_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages/${encodeURIComponent(pageId)}/comments?api-version=7.1`;
+    const r = await this._fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    return r;
+  }
 }

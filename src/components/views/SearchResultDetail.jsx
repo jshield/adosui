@@ -1,6 +1,6 @@
 import { T } from "../../lib/theme";
 import { Field, AdoLink } from "../ui";
-import { isInCollection, timeAgo, branchName, workItemUrl, serviceConnectionUrl } from "../../lib";
+import { isInCollection, timeAgo, branchName, workItemUrl, serviceConnectionUrl, wikiPageUrl } from "../../lib";
 
 export function SearchResultDetail({ result, collection, org, onWorkItemToggle, onResourceToggle }) {
   if (!result) return null;
@@ -13,6 +13,7 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
     if (type === "pipeline") return isInCollection(collection, "pipeline", item.id);
     if (type === "pr")       return isInCollection(collection, "pr", item.pullRequestId);
     if (type === "serviceconnection") return isInCollection(collection, "serviceconnection", item.id);
+    if (type === "wiki")      return isInCollection(collection, "wiki", item.id);
     return false;
   };
   const added = getInCollection();
@@ -24,6 +25,7 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
     else if (type === "pipeline")  onResourceToggle("pipeline", item.id,              collection.id);
     else if (type === "pr")        onResourceToggle("pr",       item.pullRequestId,   collection.id);
     else if (type === "serviceconnection") onResourceToggle("serviceconnection", item.id, collection.id);
+    else if (type === "wiki")      onResourceToggle("wiki",     item.id,              collection.id);
   };
 
   const containerStyle = { flex: 1, overflowY: "auto", padding: 24 };
@@ -157,6 +159,30 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
           <Field label="Authorization" value={authScheme} />
           <Field label="Project"    value={project || "—"} />
           {item.description && <Field label="Description" value={item.description} />}
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "wiki") {
+    const wikiId = item._wikiId || item.wikiId || "";
+    const wikiName = item._wikiName || item.wikiName || "";
+    const project = item._projectName || item.project || "";
+    const pagePath = item.path || item.name || "";
+    const url = wikiPageUrl(org, project, wikiId, pagePath);
+    return (
+      <div style={containerStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: T.green, background: `${T.green}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>WIKI</span>
+          <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>{wikiName}</span>
+        </div>
+        <div style={{ fontSize: 17, fontWeight: 600, color: T.green, marginBottom: 14, lineHeight: 1.35 }}>{pagePath}</div>
+        <ToggleSection />
+        {url && <AdoLink href={url} />}
+        <div>
+          <Field label="Wiki"    value={wikiName || "—"} />
+          <Field label="Page ID" value={item.id || "—"} />
+          {project && <Field label="Project" value={project} />}
         </div>
       </div>
     );

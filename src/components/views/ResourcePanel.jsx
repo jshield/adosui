@@ -4,7 +4,7 @@ import { Pill, Dot, Spinner, Input, SelectableRow, ToggleBtn } from "../ui";
 import { FilterPanel } from "./FilterPanel";
 
 export function ResourcePanel({ client, collection, selectedResource, onSelect, onFilterChange, onWorkItemToggle, onResourceToggle }) {
-  const [items, setItems] = useState({ workItems: [], repos: [], pipelines: [], prs: [], serviceConnections: [] });
+  const [items, setItems] = useState({ workItems: [], repos: [], pipelines: [], prs: [], serviceConnections: [], wikiPages: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -16,6 +16,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
   const pipelineIds = (collection.pipelines || []).map(p => String(p.id));
   const prIds = collection.prIds || [];
   const serviceConnectionIds = (collection.serviceConnections || []).map(sc => String(sc.id));
+  const wikiPageIds = (collection.wikiPages || []).map(wp => String(wp.id));
 
   useEffect(() => {
     setLoading(true); setError("");
@@ -56,8 +57,14 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
           promises.push(Promise.resolve([]));
         }
 
-        const [wi, repos, pipelines, prs, scs] = await Promise.all(promises);
-        setItems({ workItems: wi || [], repos: repos || [], pipelines: pipelines || [], prs: prs || [], serviceConnections: scs || [] });
+        if (wikiPageIds.length > 0) {
+          promises.push(client.getAllWikiPages().then(all => all.filter(wp => wikiPageIds.includes(String(wp.id)))));
+        } else {
+          promises.push(Promise.resolve([]));
+        }
+
+        const [wi, repos, pipelines, prs, scs, wikis] = await Promise.all(promises);
+        setItems({ workItems: wi || [], repos: repos || [], pipelines: pipelines || [], prs: prs || [], serviceConnections: scs || [], wikiPages: wikis || [] });
       } catch (e) {
         setError(e.message);
       } finally {
@@ -65,14 +72,14 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
       }
     };
     fetchItems();
-  }, [collection.id, collection.workItemIds, search, filters, repoIds.join(","), pipelineIds.join(","), prIds.join(","), serviceConnectionIds.join(",")]);
+  }, [collection.id, collection.workItemIds, search, filters, repoIds.join(","), pipelineIds.join(","), prIds.join(","), serviceConnectionIds.join(","), wikiPageIds.join(",")]);
 
   useEffect(() => {
     if (onFilterChange) onFilterChange(filters);
   }, [filters]);
 
   const hasFilters = filters.types.length > 0 || filters.states.length > 0 || filters.assignee || filters.areaPath;
-  const hasSavedItems = collection.workItemIds?.length > 0 || repoIds.length > 0 || pipelineIds.length > 0 || prIds.length > 0 || serviceConnectionIds.length > 0;
+  const hasSavedItems = collection.workItemIds?.length > 0 || repoIds.length > 0 || pipelineIds.length > 0 || prIds.length > 0 || serviceConnectionIds.length > 0 || wikiPageIds.length > 0;
 
   const ORDER = { Epic: 0, Feature: 1, "User Story": 2, Bug: 3, Task: 4 };
   const sortedWorkItems = [...items.workItems].sort((a, b) => (ORDER[a.fields?.["System.WorkItemType"]] ?? 5) - (ORDER[b.fields?.["System.WorkItemType"]] ?? 5));
@@ -90,6 +97,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
     { id: "pipelines", label: "Pipelines", count: items.pipelines.length },
     { id: "prs", label: "PRs", count: items.prs.length },
     { id: "serviceconnections", label: "Svc Conn.", count: items.serviceConnections.length },
+    { id: "wikipages", label: "Wiki", count: items.wikiPages.length },
   ];
 
   const isSelected = (type, id) => {
@@ -99,6 +107,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
     if (type === "pipeline") return selectedResource.type === "pipeline" && String(selectedResource.data.id) === String(id);
     if (type === "pr") return selectedResource.type === "pr" && String(selectedResource.data.pullRequestId) === String(id);
     if (type === "serviceconnection") return selectedResource.type === "serviceconnection" && String(selectedResource.data.id) === String(id);
+    if (type === "wiki") return selectedResource.type === "wiki" && String(selectedResource.data.id) === String(id);
     return false;
   };
 
@@ -192,11 +201,30 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
           </SelectableRow>
         );
       })}
-      {!items.serviceConnections.length && !loading && (
-        <div style={{ padding: "40px 16px", textAlign: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No service connections</div>
-      )}
-    </div>
-  );
+       {!items.serviceConnections.length && !loading && (
+         <div style={{ padding: "40px 16px", textAlign: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No service connections</div>
+       )}
+     </div>
+   );
+
+   const renderWikiPages = () => (
+     <div style={{ flex: 1, overflowY: "auto", paddingBottom: 12 }}>
+       {items.wikiPages.map(wp => {
+         const sel = isSelected("wiki", wp.id);
+         const path = wp.path || wp.name || "/";
+         return (
+           <SelectableRow key={wp.id} sel={sel} selColor={T.green} onClick={() => onSelect("wiki", wp)}>
+             <span style={{ fontSize: 10, color: T.green, fontFamily: "'JetBrains Mono'", width: 40, flexShrink: 0 }}>wiki</span>
+             <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{path}</span>
+             <ToggleBtn added={isInCollection(collection, "wiki", wp.id)} color={collection.color} onClick={(e) => { e.stopPropagation(); onResourceToggle("wiki", wp.id, collection.id); }} label={isInCollection(collection, "wiki", wp.id) ? "✓" : "+"} />
+           </SelectableRow>
+         );
+       })}
+       {!items.wikiPages.length && !loading && (
+         <div style={{ padding: "40px 16px", textAlign: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No wiki pages</div>
+       )}
+     </div>
+   );
 
   return (
     <>
@@ -264,6 +292,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
         : activeTab === "pipelines"         ? renderPipelines()
         : activeTab === "prs"               ? renderPRs()
         : activeTab === "serviceconnections" ? renderServiceConnections()
+        : activeTab === "wikipages"          ? renderWikiPages()
         : null
       }
     </>

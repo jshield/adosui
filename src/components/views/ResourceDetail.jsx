@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, serviceConnectionUrl } from "../../lib";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, serviceConnectionUrl, wikiPageUrl } from "../../lib";
 
 export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
   const { type, data } = resource;
@@ -20,6 +20,9 @@ export function ResourceDetail({ client, resource, org, collection, profile, onR
   }
   if (type === "serviceconnection") {
     return <ServiceConnectionDetail client={client} serviceConnection={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+  }
+  if (type === "wiki") {
+    return <WikiPageDetail client={client} wikiPage={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   return null;
 }
@@ -341,6 +344,61 @@ function ServiceConnectionDetail({ client, serviceConnection, org, collection, p
             <CommentThread
               comments={(collection.serviceConnections || []).find(sc => String(sc.id) === String(serviceConnection.id))?.comments || []}
               onAdd={(text) => onAddComment(collection.id, "serviceconnection", serviceConnection.id, text)}
+              authorName={profile?.displayName || ""}
+              disabled={syncStatus === "saving"}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WikiPageDetail({ client, wikiPage, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+  const wikiId = wikiPage._wikiId || wikiPage.wikiId || "";
+  const wikiName = wikiPage._wikiName || wikiPage.wikiName || "";
+  const project = wikiPage._projectName || wikiPage.project || "";
+  const path = wikiPage.path || wikiPage.name || "/";
+
+  const handleToggle = (resourceType, id) => {
+    if (!collection || !onResourceToggle) return;
+    onResourceToggle(resourceType, id, collection.id);
+  };
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ padding: "20px 24px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: T.green, background: `${T.green}22`, borderRadius: 4, padding: "2px 8px", fontFamily: "'JetBrains Mono'" }}>WIKI</span>
+          {wikiName && <Pill label={wikiName} color={T.green} />}
+          {project && <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>{project}</span>}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {wikiId && <AdoLink href={wikiPageUrl(org, project, wikiId, path)} />}
+          {collection && <ToggleBtn added={isInCollection(collection, "wiki", wikiPage.id)} color={collection.color} onClick={() => handleToggle("wiki", wikiPage.id)} />}
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+        <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: T.heading, marginBottom: 8, wordBreak: "break-all" }}>{path}</div>
+        <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+          {[
+            ["Page ID", wikiPage.id || "—"],
+            ["Wiki", wikiName || "—"],
+            ["Project", project || "—"],
+            ["URL", wikiPage.url || wikiPage.remoteUrl || "—"],
+          ].map(([label, val]) => (
+            <div key={label} style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+              <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>{label}</span>
+              <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'", wordBreak: "break-all", fontSize: 11 }}>{val}</span>
+            </div>
+          ))}
+        </div>
+        {collection && onAddComment && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+            <CommentThread
+              comments={(collection.wikiPages || []).find(wp => String(wp.id) === String(wikiPage.id))?.comments || []}
+              onAdd={(text) => onAddComment(collection.id, "wiki", wikiPage.id, text)}
               authorName={profile?.displayName || ""}
               disabled={syncStatus === "saving"}
             />
