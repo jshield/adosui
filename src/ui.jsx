@@ -8,6 +8,7 @@ import {
   SetupScreen,
   CollectionBuilder,
   WorkItemPanel,
+  ResourcePanel,
   ResourceDetail,
   CollectionResources,
   SearchResultsList,
@@ -50,6 +51,7 @@ export default function App() {
   const [collections,  setCollections]  = useState([]);
   const [activeCol,    setActiveCol]    = useState(null);
   const [selectedWI,   setSelectedWI]   = useState(null);
+  const [selectedResource, setSelectedResource] = useState(null); // { type: 'workitem'|'repo'|'pipeline'|'pr', data: object }
 
   // View
   const [view, setView] = useState("search"); // "search" | "newCollection" | "resources" | "pipelines"
@@ -386,6 +388,7 @@ export default function App() {
   const handleClearCache = useCallback(() => {
     client.clearCache();
     setSelectedWI(null);
+    setSelectedResource(null);
     const cur = activeCol;
     setActiveCol(null);
     setTimeout(() => setActiveCol(cur), 0);
@@ -499,9 +502,10 @@ export default function App() {
             if (deleteId) { handleCollectionDelete(deleteId); return; }
             setActiveCol(id);
             setSelectedWI(null);
+            setSelectedResource(null);
             setView("resources");
           }}
-          onNewCollection={() => { setView("newCollection"); setSelectedWI(null); }}
+          onNewCollection={() => { setView("newCollection"); setSelectedWI(null); setSelectedResource(null); }}
           onClearCache={handleClearCache}
           onDisconnect={handleDisconnect}
           onShowPipelines={() => setView("pipelines")}
@@ -530,18 +534,19 @@ export default function App() {
                   searchQuery={searchQuery}
                   collection={collection}
                   selectedResult={selectedSearchResult}
-                  onSelect={r => { setSelectedSearchResult(r); setSelectedWI(null); setView("resources"); }}
+                  onSelect={r => { setSelectedSearchResult(r); setSelectedWI(null); setSelectedResource(null); setView("resources"); }}
                   onWorkItemToggle={handleWorkItemToggle}
                   onResourceToggle={handleResourceToggle}
                 />
               ) : collection ? (
-                <WorkItemPanel
+                <ResourcePanel
                   client={client}
                   collection={collection}
-                  onSelect={wi => { setSelectedWI(wi); setSelectedSearchResult(null); setView("resources"); }}
-                  selected={selectedWI}
+                  selectedResource={selectedResource}
+                  onSelect={(type, data) => { setSelectedResource({ type, data }); setSelectedWI(null); setSelectedSearchResult(null); setView("resources"); }}
                   onFilterChange={handleCollectionFilterChange}
                   onWorkItemToggle={handleWorkItemToggle}
+                  onResourceToggle={handleResourceToggle}
                 />
               ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10, color: T.dim }}>
@@ -555,10 +560,10 @@ export default function App() {
             <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
               {view === "newCollection" ? (
                 <CollectionBuilder onDone={handleCollectionCreated} />
-              ) : selectedWI ? (
+              ) : selectedResource ? (
                 <ResourceDetail
                   client={client}
-                  workItem={selectedWI}
+                  resource={selectedResource}
                   org={org}
                   collection={collection}
                   profile={profile}
