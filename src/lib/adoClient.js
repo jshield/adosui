@@ -527,6 +527,16 @@ export class ADOClient {
     }
   }
 
+  async getWikiPageContent(wikiId, pagePath) {
+    try {
+      const url = `${this.base}/_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages?path=${encodeURIComponent(pagePath)}&includeContent=true&api-version=7.1`;
+      const r = await this._fetch(url);
+      return r.content || "";
+    } catch {
+      return "";
+    }
+  }
+
   async addWikiPageComment(wikiId, pageId, text) {
     const url = `${this.base}/_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages/${encodeURIComponent(pageId)}/comments?api-version=7.1`;
     const r = await this._fetch(url, {

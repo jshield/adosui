@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
 import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, serviceConnectionUrl, wikiPageUrl } from "../../lib";
+import { marked } from "marked";
 
 export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
   const { type, data } = resource;
@@ -360,9 +361,77 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
   const project = wikiPage._projectName || wikiPage.project || "";
   const path = wikiPage.path || wikiPage.name || "/";
 
+  const [content, setContent] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
   const handleToggle = (resourceType, id) => {
     if (!collection || !onResourceToggle) return;
     onResourceToggle(resourceType, id, collection.id);
+  };
+
+  // Fetch content on demand when wiki page changes
+  useEffect(() => {
+    if (wikiPage?._wikiId && wikiPage?.path) {
+      setIsLoading(true);
+      client.getWikiPageContent(wikiPage._wikiId, wikiPage.path)
+        .then(setContent)
+        .catch(() => setContent(""))
+        .finally(() => setIsLoading(false));
+    }
+  }, [wikiPage, client]);
+
+  // Custom renderer for markdown to match theme
+  const renderMarkdown = (text) => {
+    const renderer = new marked.Renderer();
+    
+    // Style headings to match theme
+    renderer.heading = (text, level) => {
+      const fontSize = level === 1 ? 20 : level === 2 ? 18 : 16;
+      return `<h${level} style="color: ${T.text}; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: ${fontSize}px; margin: 16px 0 8px 0;">${text}</h${level}>`;
+    };
+    
+    // Style paragraphs
+    renderer.paragraph = (text) => `<p style="color: ${T.muted}; margin: 12px 0; line-height: 1.6;">${text}</p>`;
+    
+    // Style inline code
+    renderer.codespan = (code) => `<code style="color: ${T.cyan}; background: rgba(255,255,255,0.06); font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 3px;">${code}</code>`;
+    
+    // Style code blocks
+    renderer.code = (code, language) => `<pre style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 12px; overflow-x: auto; margin: 12px 0;"><code style="font-family: 'JetBrains Mono', monospace; color: ${T.text};">${code}</code></pre>`;
+    
+    // Style links
+    renderer.link = (href, title, text) => `<a href="${href}" style="color: ${T.blue}; text-decoration: underline;" ${title ? `title="${title}"` : ""}>${text}</a>`;
+    
+    // Style blockquotes
+    renderer.blockquote = (quote) => `<blockquote style="border-left: 3px solid ${T.amber}; padding-left: 16px; margin: 12px 0; color: ${T.dim};">${quote}</blockquote>`;
+    
+    // Style lists
+    renderer.list = (body, ordered) => {
+      const tag = ordered ? "ol" : "ul";
+      return `<${tag} style="margin: 12px 0; padding-left: 20px; color: ${T.muted};">${body}</${tag}>`;
+    };
+    
+    // Style list items
+    renderer.listitem = (text) => `<li style="margin: 4px 0; color: ${T.muted};">${text}</li>`;
+    
+    // Style horizontal rules
+    renderer.hr = () => `<hr style="border: none; border-top: 1px solid ${T.border}; margin: 24px 0;" />`;
+    
+    // Style tables
+    renderer.table = (header, body) => `<table style="border-collapse: collapse; width: 100%; margin: 12px 0;"><thead>${header}</thead><tbody>${body}</tbody></table>`;
+    renderer.tablerow = (content) => `<tr style="border-bottom: 1px solid ${T.border};">${content}</tr>`;
+    renderer.tablecell = (content, flags) => {
+      const tag = flags.header ? "th" : "td";
+      return `<${tag} style="padding: 8px 12px; text-align: ${flags.align || "left"}; color: ${T.text};">${content}</${tag}>`;
+    };
+    
+    marked.setOptions({
+      renderer: renderer,
+      gfm: true,
+      breaks: true
+    });
+    
+    return marked.parse(text);
   };
 
   return (
@@ -394,6 +463,31 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
             </div>
           ))}
         </div>
+        
+        {/* Wiki Content Section */}
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+          <div style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>Content</div>
+          {isLoading ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+              <Spinner size={24} />
+            </div>
+          ) : content ? (
+            <div 
+              style={{
+                color: T.text,
+                fontSize: 13,
+                lineHeight: 1.6,
+                fontFamily: "'Barlow', sans-serif",
+              }}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+            />
+          ) : (
+            <div style={{ color: T.dim, fontSize: 12, textAlign: "center", padding: 20 }}>
+              No content available
+            </div>
+          )}
+        </div>
+
         {collection && onAddComment && (
           <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
             <CommentThread
