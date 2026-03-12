@@ -11,7 +11,7 @@ const SYNC_LABEL = {
   error:  { text: "Save failed", color: T.red },
 };
 
-export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, client, onUpdatePat }) {
+export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, workerActivity, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, client, onUpdatePat }) {
   // Split into shared and personal, hiding the reserved pinned-pipelines collection
   const shared   = collections.filter(c => c.scope !== "personal");
   const personal = collections.filter(c => c.scope === "personal" && c.id !== PINNED_PIPELINES_ID);
@@ -126,6 +126,26 @@ export function Rail({ profile, org, collections, activeCol, activeView, syncSta
           <div style={{ fontSize: 10, color: syncInfo.color, fontFamily: "'JetBrains Mono'", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ width: 5, height: 5, borderRadius: "50%", background: syncInfo.color, display: "inline-block" }} />
             {syncInfo.text}
+          </div>
+        )}
+
+        {/* Background worker activity */}
+        {workerActivity?.isRunning && (
+          <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(0,0,0,0.2)", borderRadius: 4, fontSize: 9, fontFamily: "'JetBrains Mono'" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4 }}>
+              <span style={{ width: 4, height: 4, borderRadius: "50%", background: T.green, animation: "pulse 1s infinite" }} />
+              <span style={{ color: T.dimmer }}>Background sync active</span>
+            </div>
+            {workerActivity.lastRefresh && (
+              <div style={{ color: T.dimmer, opacity: 0.7 }}>
+                Last refresh: {new Date(workerActivity.lastRefresh).toLocaleTimeString()}
+              </div>
+            )}
+            {workerActivity.activityLog[0] && (
+              <div style={{ color: T.dim, marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {workerActivity.activityLog[0].message}
+              </div>
+            )}
           </div>
         )}
 

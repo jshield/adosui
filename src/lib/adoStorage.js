@@ -208,6 +208,17 @@ export class ADOStorage {
     const path    = collectionPath(collection, this.profile?.id);
     const msg     = `superui: update collection "${collection.name}"`;
 
+    // Skip push if content hasn't changed
+    try {
+      const existing = await this.client.readGitFile(this._project, this._repoId, path);
+      if (existing?.content === content) {
+        console.debug(`[adoStorage] No changes to "${collection.name}", skipping push`);
+        return existing.objectId || null;
+      }
+    } catch (e) {
+      console.warn(`[adoStorage] Failed to check existing content for "${collection.name}", proceeding with push:`, e.message);
+    }
+
     try {
       await this.client.pushGitFile(
         this._project,

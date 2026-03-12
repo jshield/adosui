@@ -17,6 +17,7 @@ import {
   Rail,
 } from "./components/views";
 import { hasStoredCredentials, clearCredentials, loadPAT, clearSessionKey } from "./lib/credentialStore";
+import backgroundWorker from "./lib/backgroundWorker";
 
 // localStorage key for config repo pointer (non-sensitive, org-scoped)
 const REPO_CONFIG_KEY = "ado-superui-repo-config";
@@ -62,6 +63,7 @@ export default function App() {
   // Sync status
   const [syncStatus,  setSyncStatus]  = useState("idle");
   const [toast,       setToast]       = useState(null);
+  const [workerActivity, setWorkerActivity] = useState({ activityLog: [], lastRefresh: null, isRunning: false });
   const saveTimerRef  = useRef(null);
   const pendingSaves  = useRef(new Set());
 
@@ -69,6 +71,12 @@ export default function App() {
   const showToast = useCallback((message, color = T.amber) => {
     setToast({ message, color });
     setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  // Subscribe to background worker activity
+  useEffect(() => {
+    const unsub = backgroundWorker.subscribe(setWorkerActivity);
+    return unsub;
   }, []);
 
   // Handle connect (auth via stored credentials or new login)
@@ -99,6 +107,8 @@ export default function App() {
         }
         setAppPhase("app");
         setView("newCollection");
+        backgroundWorker.setClient(c);
+        backgroundWorker.start();
       } else {
         setAppPhase("setup");
       }
@@ -364,6 +374,7 @@ export default function App() {
 
   // Disconnect
   const handleDisconnect = useCallback(() => {
+    backgroundWorker.stop();
     setClient(null); setOrg(""); setProfile(null);
     setCollections([]); setActiveCol(null); setStorage(null);
     setRepoConfig(null);
@@ -419,6 +430,8 @@ export default function App() {
             }
             setAppPhase("app");
             setView("newCollection");
+            backgroundWorker.setClient(c);
+            backgroundWorker.start();
           } else {
             setAppPhase("setup");
           }
@@ -446,7 +459,7 @@ export default function App() {
   /* ── Render: App ──────────────────────────────────────────────── */
   return (
     <>
-      <style>{FONTS + `@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{FONTS + `@keyframes spin { to { transform: rotate(360deg); } } @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
 
       {/* Toast notification */}
       {toast && (
@@ -481,6 +494,7 @@ export default function App() {
           activeCol={activeCol}
           activeView={view}
           syncStatus={syncStatus}
+          workerActivity={workerActivity}
           onSelectCollection={(id, deleteId) => {
             if (deleteId) { handleCollectionDelete(deleteId); return; }
             setActiveCol(id);
