@@ -167,10 +167,22 @@ class BackgroundWorker {
         try { return await this.client.getPipelines(projectName); } catch { return []; }
       })()).map(pl => async () => {
         try {
-          const configType = pl.configuration?.type || pl.configurationType || "yaml";
-          const runs = configType === "yaml"
-            ? await this.client.getPipelineRuns(projectName, pl.id)
-            : await this.client.getBuildRuns(projectName, pl.id);
+          // Prefer the builds endpoint because it reliably includes repository
+          // and branch information needed by the UI. Fall back to pipeline
+          // runs if builds returns nothing.
+          let runs = [];
+          try {
+            runs = await this.client.getBuildRuns(projectName, pl.id);
+          } catch (e) {
+            // ignore and try pipeline runs below
+          }
+          if (!runs || runs.length === 0) {
+            try {
+              runs = await this.client.getPipelineRuns(projectName, pl.id);
+            } catch (e) {
+              runs = [];
+            }
+          }
           runsMap[pl.id] = (runs && runs[0]) || null;
         } catch (e) {
           runsMap[pl.id] = null;
