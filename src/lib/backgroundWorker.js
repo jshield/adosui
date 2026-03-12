@@ -163,6 +163,11 @@ class BackgroundWorker {
       const serviceConnections = await this.client.getServiceConnections(projectName);
       cache.set(keyPrefix + "serviceConnections", serviceConnections, CACHE_TTL);
     } catch (e) {}
+
+    try {
+      const wikiPages = await this.client.getWikiPagesForProject(projectName);
+      cache.set(keyPrefix + "wikiPages", wikiPages, CACHE_TTL);
+    } catch (e) {}
   }
 }
 
