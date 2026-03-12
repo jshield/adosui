@@ -542,7 +542,13 @@ export class ADOClient {
         url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages?path=${encodeURIComponent(pagePath)}&includeContent=true&api-version=7.1`;
       }
       const r = await this._fetch(url);
-      return r.content || "";
+      let content = r.content;
+      // Handle case where content might be an object
+      if (content && typeof content !== "string") {
+        // Try to stringify if it's an object, or convert to string
+        content = typeof content === "object" ? JSON.stringify(content) : String(content);
+      }
+      return content || "";
     } catch {
       return "";
     }

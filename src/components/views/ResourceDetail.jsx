@@ -448,6 +448,9 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
           );
           setContent(markdown);
           if (markdown) {
+            console.log("Raw markdown:", JSON.stringify(markdown));
+            console.log("Markdown type:", typeof markdown);
+            console.log("Markdown length:", markdown.length);
             const html = marked.parse(markdown);
             setRenderedContent(html);
           } else {
