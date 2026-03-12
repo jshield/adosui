@@ -449,6 +449,22 @@ export class ADOClient {
     return res.json();
   }
 
+  // Helper to recursively flatten wiki pages hierarchy
+  flattenWikiPages(page, wikiId, wikiName, projectName) {
+    const result = [{
+      ...page,
+      _wikiId: wikiId,
+      _wikiName: wikiName,
+      _projectName: projectName,
+    }];
+    if (page.subPages && page.subPages.length > 0) {
+      page.subPages.forEach(sub => {
+        result.push(...this.flattenWikiPages(sub, wikiId, wikiName, projectName));
+      });
+    }
+    return result;
+  }
+
   async getWikiPagesForProject(project) {
     try {
       const wikis = await this.listWikis(project);
@@ -457,13 +473,10 @@ export class ADOClient {
         try {
           const url = `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${wiki.id}/pages?api-version=7.1&recursionLevel=1`;
           const r = await this._fetch(url);
-          const pages = (r.value || []).map(p => ({
-            ...p,
-            _wikiId: wiki.id,
-            _wikiName: wiki.name,
-            _projectName: project,
-          }));
-          allPages.push(...pages);
+          if (r && r.path) {
+            const pages = this.flattenWikiPages(r, wiki.id, wiki.name, project);
+            allPages.push(...pages);
+          }
         } catch { /* skip wikis we can't access */ }
       }
       return allPages;
@@ -484,13 +497,10 @@ export class ADOClient {
         try {
           const url = `${this.base}/_apis/wiki/wikis/${wiki.id}/pages?api-version=7.1&recursionLevel=1`;
           const r = await this._fetch(url);
-          const pages = (r.value || []).map(p => ({
-            ...p,
-            _wikiId: wiki.id,
-            _wikiName: wiki.name,
-            _projectName: "",
-          }));
-          allPages.push(...pages);
+          if (r && r.path) {
+            const pages = this.flattenWikiPages(r, wiki.id, wiki.name, "");
+            allPages.push(...pages);
+          }
         } catch { /* skip wikis we can't access */ }
       }
       if (!this._projects.length) await this.getProjects();
