@@ -45,7 +45,7 @@ renderer.blockquote = function(token) {
 // Style lists
 renderer.list = function(token) {
   const tag = token.ordered ? "ol" : "ul";
-  const body = this.parser.parse(token.items);
+  const body = token.items.map(item => this.listitem(item)).join("");
   return `<${tag} style="margin: 12px 0; padding-left: 20px; color: ${T.muted};">${body}</${tag}>`;
 };
 
