@@ -271,21 +271,18 @@ export class ADOClient {
       for (const id of definitionIds) {
         const key = String(id);
         const arr = byDef[key] || [];
-        if (!arr.length) {
-          result[key] = null;
-          continue;
-        }
         // Sort by startTime/queueTime desc
         arr.sort((a, b) => {
           const ta = new Date(a.startTime || a.queueTime || 0).getTime();
           const tb = new Date(b.startTime || b.queueTime || 0).getTime();
           return tb - ta;
         });
-        result[key] = arr[0];
+        // Return array of recent builds (newest first) — may be empty
+        result[key] = arr;
       }
       return result;
     } catch (e) {
-      return definitionIds.reduce((acc, id) => (acc[String(id)] = null, acc), {});
+      return definitionIds.reduce((acc, id) => (acc[String(id)] = [], acc), {});
     }
   }
 

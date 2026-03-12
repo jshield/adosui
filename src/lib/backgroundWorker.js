@@ -176,31 +176,32 @@ class BackgroundWorker {
         const CHUNK_DEFS = 20;
         for (let i = 0; i < defIds.length; i += CHUNK_DEFS) {
           const chunk = defIds.slice(i, i + CHUNK_DEFS);
-            try {
-            const map = await this.client.getBuildRunsForDefinitions(projectName, chunk, 5);
-            // map: definitionId -> latest build or null
+          try {
+            const map = await this.client.getBuildRunsForDefinitions(projectName, chunk, 3);
+            // map: definitionId -> array of builds (newest first) or []
             // Ensure keys are strings when merging
             for (const k of Object.keys(map)) runsMap[String(k)] = map[k];
           } catch (e) {
-            // On failure, mark these ids as null and continue
-            for (const id of chunk) runsMap[String(id)] = null;
+            // On failure, mark these ids as empty arrays and continue
+            for (const id of chunk) runsMap[String(id)] = [];
           }
         }
 
         // For any definitions with no builds returned, fall back to pipeline runs
-        const missing = Object.keys(runsMap).filter(k => !runsMap[k]);
+        const missing = Object.keys(runsMap).filter(k => runsMap[k] == null || (Array.isArray(runsMap[k]) && runsMap[k].length === 0));
         if (missing.length) {
-        for (let i = 0; i < missing.length; i += BATCH_SIZE) {
-          const chunk = missing.slice(i, i + BATCH_SIZE);
-          await Promise.all(chunk.map(async (defId) => {
-            try {
-              const r = await this.client.getPipelineRuns(projectName, defId);
-              runsMap[String(defId)] = (r && r[0]) || null;
-            } catch (e) {
-              runsMap[String(defId)] = null;
-            }
-          }));
-        }
+          for (let i = 0; i < missing.length; i += BATCH_SIZE) {
+            const chunk = missing.slice(i, i + BATCH_SIZE);
+            await Promise.all(chunk.map(async (defId) => {
+              try {
+                const r = await this.client.getPipelineRuns(projectName, defId);
+                // store an array (may be empty) to keep shape consistent
+                runsMap[String(defId)] = (r && r) || [];
+              } catch (e) {
+                runsMap[String(defId)] = [];
+              }
+            }));
+          }
         }
       }
 
