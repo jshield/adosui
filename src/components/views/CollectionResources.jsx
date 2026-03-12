@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Pill, Dot, Card, Spinner, CommentThread } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, pipelineStatus, prStatus, branchName, getLatestRun, getRunBranch, getRunStatusVal } from "../../lib";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, pipelineStatus, prStatus, branchName, getLatestRun, getRunBranch, getRunStatusVal, cache } from "../../lib";
 
 export function CollectionResources({
   client,
