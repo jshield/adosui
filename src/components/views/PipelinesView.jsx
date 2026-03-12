@@ -107,6 +107,11 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
     if (loading) return <div style={{ padding: 20, color: T.dim }}>Loading...</div>;
     return (
       <div style={{ flex: 1, overflowY: "auto" }}>
+        {lastRunsRefresh && (
+          <div style={{ padding: "6px 14px", fontSize: 10, color: T.dim, borderBottom: `1px solid ${T.border}` }}>
+            Runs refreshed: {timeAgo(lastRunsRefresh)}
+          </div>
+        )}
         {pinnedPipelines.length > 0 && (
           <>
             <div style={{ padding: "8px 14px", fontSize: 10, color: T.amber, background: "rgba(245,158,11,0.05)", borderBottom: `1px solid ${T.border}` }}>
