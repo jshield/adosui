@@ -62,14 +62,21 @@ export const prStatus = s => {
 /* ── Collection membership check ────────────────────────────────── */
 export const isInCollection = (collection, type, id) => {
   if (!collection) return false;
-  const key = {
-    workitem: "workItemIds",
-    repo: "repoIds",
-    pipeline: "pipelineIds",
-    pr: "prIds",
-  }[type];
-  if (!key) return false;
-  return (collection[key] || []).includes(String(id));
+  const sid = String(id);
+  
+  if (type === "workitem") {
+    return (collection.workItemIds || []).includes(sid);
+  }
+  if (type === "repo") {
+    return (collection.repos || []).some(r => r.id === sid);
+  }
+  if (type === "pipeline") {
+    return (collection.pipelines || []).some(p => String(p.id) === sid);
+  }
+  if (type === "pr") {
+    return (collection.prIds || []).includes(sid);
+  }
+  return false;
 };
 
 /* ── ADO URL helpers ───────────────────────────────────────────── */
