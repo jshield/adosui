@@ -4,12 +4,14 @@ import { Pill, Dot, Spinner, SelectableRow, Field, AdoLink, ToggleBtn, CommentTh
 import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl } from "../../lib";
 
 export function ResourceDetail({ client, workItem, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
-  const [repos,     setRepos]     = useState(null);
-  const [pipelines, setPipelines] = useState(null);
-  const [prs,       setPrs]       = useState(null);
-  const [tests,     setTests]     = useState(null);
-  const [loading,   setLoading]   = useState(true);
-  const [activeTab, setActiveTab] = useState("details");
+  const [repos,         setRepos]         = useState(null);
+  const [pipelines,     setPipelines]     = useState(null);
+  const [prs,           setPrs]           = useState(null);
+  const [tests,         setTests]         = useState(null);
+  const [loading,       setLoading]       = useState(true);
+  const [activeTab,     setActiveTab]     = useState("details");
+  const [wiComments,    setWiComments]    = useState([]);
+  const [wiCommentsLoading, setWiCommentsLoading] = useState(false);
 
   const [selectedRepo,     setSelectedRepo]     = useState(null);
   const [selectedPipeline, setSelectedPipeline] = useState(null);
@@ -20,6 +22,23 @@ export function ResourceDetail({ client, workItem, org, collection, profile, onR
   const [pipelineSearch, setPipelineSearch] = useState("");
   const [prSearch,       setPRSearch]       = useState("");
   const [testSearch,     setTestSearch]     = useState("");
+
+  const type     = workItem.fields?.["System.WorkItemType"] || "";
+  const state    = workItem.fields?.["System.State"] || "";
+  const title    = workItem.fields?.["System.Title"] || "Untitled";
+  const areaPath = workItem.fields?.["System.AreaPath"]?.split("\\")[0] || "";
+  const project  = workItem.fields?.["System.TeamProject"] || areaPath;
+  const projectId = client._projects?.find(p => p.name === project)?.id || project;
+
+  useEffect(() => {
+    if (activeTab === "details" && projectId) {
+      setWiCommentsLoading(true);
+      client.getWorkItemComments(workItem.id, projectId)
+        .then(setWiComments)
+        .catch(() => setWiComments([]))
+        .finally(() => setWiCommentsLoading(false));
+    }
+  }, [workItem.id, activeTab, projectId]);
 
   useEffect(() => {
     setLoading(true);
@@ -38,11 +57,6 @@ export function ResourceDetail({ client, workItem, org, collection, profile, onR
       setLoading(false);
     });
   }, [workItem.id]);
-
-  const type     = workItem.fields?.["System.WorkItemType"] || "";
-  const state    = workItem.fields?.["System.State"] || "";
-  const title    = workItem.fields?.["System.Title"] || "Untitled";
-  const areaPath = workItem.fields?.["System.AreaPath"]?.split("\\")[0] || "";
 
   const tabs = [
     { id: "details",   label: "Details" },
@@ -99,6 +113,30 @@ export function ResourceDetail({ client, workItem, org, collection, profile, onR
               </div>
             );
           })}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
+        <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Comments</div>
+        {!projectId ? (
+          <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>Project not available</div>
+        ) : wiCommentsLoading ? (
+          <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading...</div>
+        ) : (
+          <CommentThread
+            comments={wiComments.map(c => ({
+              author: c.createdBy?.displayName || "Unknown",
+              createdAt: c.createdDate,
+              text: c.text || "",
+            }))}
+            onAdd={async (text) => {
+              await client.addWorkItemComment(workItem.id, text, projectId);
+              const updated = await client.getWorkItemComments(workItem.id, projectId);
+              setWiComments(updated);
+            }}
+            authorName={profile?.displayName || ""}
+            disabled={syncStatus === "saving"}
+          />
+        )}
       </div>
     </div>
   );

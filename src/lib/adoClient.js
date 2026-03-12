@@ -120,12 +120,31 @@ export class ADOClient {
     const fields = [
       "System.Id","System.Title","System.WorkItemType","System.State",
       "Microsoft.VSTS.Common.Priority","System.Parent","System.AssignedTo",
-      "System.ChangedDate","System.AreaPath",
+      "System.ChangedDate","System.AreaPath","System.TeamProject",
     ].join(",");
     const detail = await this._fetch(
       `${this.base}/_apis/wit/workitems?ids=${ids.join(",")}&fields=${fields}&api-version=7.1`
     );
     return detail.value || [];
+  }
+
+  async getWorkItemComments(workItemId, project) {
+    if (!project) return [];
+    try {
+      const r = await this._fetch(
+        `${this.base}/${encodeURIComponent(project)}/_apis/wit/workItems/${workItemId}/comments?api-version=7.1-preview.4`
+      );
+      return r.comments || [];
+    } catch { return []; }
+  }
+
+  async addWorkItemComment(workItemId, text, project) {
+    if (!project) return;
+    const r = await this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/wit/workItems/${workItemId}/comments?api-version=7.1-preview.4`,
+      { method: "POST", body: JSON.stringify({ text }) }
+    );
+    return r;
   }
 
   async getAllRepos(forceRefresh = false) {
