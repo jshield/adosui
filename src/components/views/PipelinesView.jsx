@@ -121,7 +121,7 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
               </button>
             </div>
             {pinnedPipelines.map((p) => {
-               const run    = pipelineRuns[p.id];
+               const run    = pipelineRuns[String(p.id)];
                // For run objects, pipelineStatus now accepts the object, but
                // prefer extracting a status string when available to keep labels
                // consistent.
@@ -132,8 +132,15 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
                   onClick={() => setSelectedPipeline(allPipelines.find(x => String(x.id) === String(p.id)) || p)}
                   style={{ display: "flex", alignItems: "center", padding: "8px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? `${T.amber}08` : "transparent" }}>
                   <Dot color={status.color} pulse={status.pulse} />
-                  <span style={{ flex: 1, fontSize: 12 }}>{p.name}</span>
-                  <span style={{ fontSize: 10, color: status.color, marginRight: 8 }}>{status.label}</span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 12 }}>{p.name}</span>
+                {run && (
+                  <span style={{ fontSize: 10, color: T.dim }}>
+                    {branchName(run.sourceBranch || run.sourceRefName || run.repository?.refName || run.repository?.branch || run.resources?.repositories?.self?.refName)} · {timeAgo(run.startTime || run.queueTime)}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: 10, color: status.color, marginRight: 8 }}>{status.label}</span>
                   <button
                     onClick={(e) => { e.stopPropagation(); onTogglePin(p); }}
                     style={{ background: "none", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, padding: "2px 6px", cursor: "pointer", color: T.muted, fontSize: 11 }}>
@@ -147,7 +154,7 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
         <div style={{ padding: "8px 14px", fontSize: 10, color: T.dim, borderBottom: `1px solid ${T.border}`, borderTop: pinnedPipelines.length ? `1px solid ${T.border}` : "none" }}>
           All Pipelines ({filteredPipelines.length})
         </div>
-        {filteredPipelines.slice(0, 50).map((p) => {
+          {filteredPipelines.slice(0, 50).map((p) => {
            const pinned = pinnedIds.has(String(p.id));
            const run    = getPipelineRun(p);
            const status = pipelineStatus(run?.result || run?.state || run?.status || run);
@@ -156,7 +163,14 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
             <div key={p.id} onClick={() => setSelectedPipeline(p)}
               style={{ display: "flex", alignItems: "center", padding: "8px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? `${T.amber}08` : "transparent" }}>
               {pinned && <Dot color={status.color} />}
-              <span style={{ flex: 1, fontSize: 11, marginLeft: pinned ? 0 : 12 }}>{p.name}</span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', marginLeft: pinned ? 0 : 12 }}>
+                <span style={{ fontSize: 11 }}>{p.name}</span>
+                {run && (
+                  <span style={{ fontSize: 10, color: T.dim }}>
+                    {branchName(run.sourceBranch || run.sourceRefName || run.repository?.refName || run.resources?.repositories?.self?.refName)} · {timeAgo(run.startTime || run.queueTime)}
+                  </span>
+                )}
+              </div>
               <span style={{ fontSize: 10, color: T.dim, marginRight: 8 }}>{p._projectName}</span>
               <button
                 onClick={(e) => {
