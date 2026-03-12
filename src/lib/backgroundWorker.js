@@ -3,6 +3,7 @@ import { cache } from "../lib";
 const TICK_INTERVAL = 2 * 60 * 1000;
 const BATCH_SIZE = 5;
 const CACHE_TTL = 5 * 60 * 1000;
+const RUNS_TTL = 60 * 1000; // 1 minute for latest pipeline runs
 
 class BackgroundWorker {
   constructor() {
@@ -14,6 +15,7 @@ class BackgroundWorker {
     this.isPaused = false;
     this.activityLog = [];
     this.lastRefresh = null;
+    this.lastPipelineRunsRefresh = null;
     this.listeners = new Set();
     this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
   }
@@ -54,6 +56,7 @@ class BackgroundWorker {
     this.listeners.forEach(cb => cb({
       activityLog: this.activityLog,
       lastRefresh: this.lastRefresh,
+      lastPipelineRunsRefresh: this.lastPipelineRunsRefresh,
       isRunning: this.isRunning,
     }));
   }
@@ -63,6 +66,7 @@ class BackgroundWorker {
     callback({
       activityLog: this.activityLog,
       lastRefresh: this.lastRefresh,
+      lastPipelineRunsRefresh: this.lastPipelineRunsRefresh,
       isRunning: this.isRunning,
     });
     return () => this.listeners.delete(callback);
@@ -155,6 +159,33 @@ class BackgroundWorker {
       const pipelines = await this.client.getPipelines(projectName);
       cache.set(keyPrefix + "pipelines", pipelines, CACHE_TTL);
     } catch (e) {}
+
+    // Fetch latest run for each pipeline (limited concurrency)
+    try {
+      const runsMap = {};
+      const pipelineFetchers = (await (async () => {
+        try { return await this.client.getPipelines(projectName); } catch { return []; }
+      })()).map(pl => async () => {
+        try {
+          const configType = pl.configuration?.type || pl.configurationType || "yaml";
+          const runs = configType === "yaml"
+            ? await this.client.getPipelineRuns(projectName, pl.id)
+            : await this.client.getBuildRuns(projectName, pl.id);
+          runsMap[pl.id] = (runs && runs[0]) || null;
+        } catch (e) {
+          runsMap[pl.id] = null;
+        }
+      });
+
+      for (let i = 0; i < pipelineFetchers.length; i += BATCH_SIZE) {
+        const chunk = pipelineFetchers.slice(i, i + BATCH_SIZE).map(fn => fn());
+        await Promise.all(chunk);
+      }
+      cache.set(keyPrefix + "pipelineRuns", runsMap, RUNS_TTL);
+      this.lastPipelineRunsRefresh = new Date().toISOString();
+    } catch (e) {
+      this.log(`Failed to fetch pipeline runs for ${projectName}: ${e.message}`);
+    }
 
     try {
       const prs = await this.client.getPullRequests(projectName);

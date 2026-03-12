@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Dot, SelectableRow, Field } from "../ui";
-import { timeAgo, pipelineStatus, branchName, pipelineUrl } from "../../lib";
+import { timeAgo, pipelineStatus, branchName, pipelineUrl, cache } from "../../lib";
 import { ResourceDetail } from "./ResourceDetail";
 
 /**
@@ -42,27 +42,32 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
     setRefreshing(true);
     const runsMap = {};
     try {
-      await Promise.all(
-        pinnedPipelines.map(async (p) => {
-          try {
-            const pipeline = allPipelines.find(pl => String(pl.id) === String(p.id));
-            const configType  = p.configurationType || pipeline?.configuration?.type;
-            const projectName = p.project || pipeline?._projectName;
+      // Try to read cached runs first (populated by background worker)
+      await Promise.all(pinnedPipelines.map(async (p) => {
+        try {
+          const pipeline = allPipelines.find(pl => String(pl.id) === String(p.id));
+          const projectName = p.project || pipeline?._projectName;
+          if (!projectName) { runsMap[p.id] = null; return; }
 
-            if (!projectName) { runsMap[p.id] = null; return; }
-
-            let runs = [];
-            if (configType === "yaml") {
-              runs = await client.getPipelineRuns(projectName, p.id);
-            } else {
-              runs = await client.getBuildRuns(projectName, p.id);
-            }
-            runsMap[p.id] = runs[0] || null;
-          } catch {
-            runsMap[p.id] = null;
+          const cached = cache.get(`project:${projectName}:pipelineRuns`) || {};
+          if (cached && Object.prototype.hasOwnProperty.call(cached, p.id)) {
+            runsMap[p.id] = cached[p.id];
+            return;
           }
-        })
-      );
+
+          // Fallback to direct API call if cache miss
+          const configType  = p.configurationType || pipeline?.configuration?.type;
+          let runs = [];
+          if (configType === "yaml") {
+            runs = await client.getPipelineRuns(projectName, p.id);
+          } else {
+            runs = await client.getBuildRuns(projectName, p.id);
+          }
+          runsMap[p.id] = runs[0] || null;
+        } catch (err) {
+          runsMap[p.id] = null;
+        }
+      }));
       setPipelineRuns(runsMap);
     } catch (e) {
       console.error("Failed to fetch runs:", e);
