@@ -373,7 +373,7 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
   useEffect(() => {
     if (wikiPage?._wikiId && wikiPage?.path) {
       setIsLoading(true);
-      client.getWikiPageContent(wikiPage._wikiId, wikiPage.path)
+      client.getWikiPageContent(wikiPage._wikiId, wikiPage.path, wikiPage._projectName || wikiPage.project)
         .then(setContent)
         .catch(() => setContent(""))
         .finally(() => setIsLoading(false));
