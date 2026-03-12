@@ -4,48 +4,78 @@ import { T } from "../../lib/theme";
 import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
 import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, serviceConnectionUrl, wikiPageUrl } from "../../lib";
 
-// Configure marked with custom renderer
+// Configure marked with custom renderer for v17 API
 const renderer = new marked.Renderer();
 
-// Style headings to match theme
-renderer.heading = (text, level) => {
-  const fontSize = level === 1 ? 20 : level === 2 ? 18 : 16;
-  return `<h${level} style="color: ${T.text}; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: ${fontSize}px; margin: 16px 0 8px 0;">${text}</h${level}>`;
+// Style headings to match theme - marked v17 receives token object
+renderer.heading = function(token) {
+  const fontSize = token.depth === 1 ? 20 : token.depth === 2 ? 18 : 16;
+  const text = this.parser.parseInline(token.tokens);
+  return `<h${token.depth} style="color: ${T.text}; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: ${fontSize}px; margin: 16px 0 8px 0;">${text}</h${token.depth}>`;
 };
 
-// Style paragraphs
-renderer.paragraph = (text) => `<p style="color: ${T.muted}; margin: 12px 0; line-height: 1.6;">${text}</p>`;
+// Style paragraphs - marked v17 receives token object
+renderer.paragraph = function(token) {
+  const text = this.parser.parseInline(token.tokens);
+  return `<p style="color: ${T.muted}; margin: 12px 0; line-height: 1.6;">${text}</p>`;
+};
 
 // Style inline code
-renderer.codespan = (code) => `<code style="color: ${T.cyan}; background: rgba(255,255,255,0.06); font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 3px;">${code}</code>`;
+renderer.codespan = function(token) {
+  return `<code style="color: ${T.cyan}; background: rgba(255,255,255,0.06); font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 3px;">${token.text}</code>`;
+};
 
 // Style code blocks
-renderer.code = (code, language) => `<pre style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 12px; overflow-x: auto; margin: 12px 0;"><code style="font-family: 'JetBrains Mono', monospace; color: ${T.text};">${code}</code></pre>`;
+renderer.code = function(token) {
+  return `<pre style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 12px; overflow-x: auto; margin: 12px 0;"><code style="font-family: 'JetBrains Mono', monospace; color: ${T.text};">${token.text}</code></pre>`;
+};
 
 // Style links
-renderer.link = (href, title, text) => `<a href="${href}" style="color: ${T.blue}; text-decoration: underline;" ${title ? `title="${title}"` : ""}>${text}</a>`;
+renderer.link = function(token) {
+  const text = this.parser.parseInline(token.tokens);
+  return `<a href="${token.href}" style="color: ${T.blue}; text-decoration: underline;" ${token.title ? `title="${token.title}"` : ""}>${text}</a>`;
+};
 
 // Style blockquotes
-renderer.blockquote = (quote) => `<blockquote style="border-left: 3px solid ${T.amber}; padding-left: 16px; margin: 12px 0; color: ${T.dim};">${quote}</blockquote>`;
+renderer.blockquote = function(token) {
+  const text = this.parser.parse(token.tokens);
+  return `<blockquote style="border-left: 3px solid ${T.amber}; padding-left: 16px; margin: 12px 0; color: ${T.dim};">${text}</blockquote>`;
+};
 
 // Style lists
-renderer.list = (body, ordered) => {
-  const tag = ordered ? "ol" : "ul";
+renderer.list = function(token) {
+  const tag = token.ordered ? "ol" : "ul";
+  const body = this.parser.parse(token.items);
   return `<${tag} style="margin: 12px 0; padding-left: 20px; color: ${T.muted};">${body}</${tag}>`;
 };
 
 // Style list items
-renderer.listitem = (text) => `<li style="margin: 4px 0; color: ${T.muted};">${text}</li>`;
+renderer.listitem = function(token) {
+  const text = this.parser.parse(token.tokens);
+  return `<li style="margin: 4px 0; color: ${T.muted};">${text}</li>`;
+};
 
 // Style horizontal rules
-renderer.hr = () => `<hr style="border: none; border-top: 1px solid ${T.border}; margin: 24px 0;" />`;
+renderer.hr = function() {
+  return `<hr style="border: none; border-top: 1px solid ${T.border}; margin: 24px 0;" />`;
+};
 
 // Style tables
-renderer.table = (header, body) => `<table style="border-collapse: collapse; width: 100%; margin: 12px 0;"><thead>${header}</thead><tbody>${body}</tbody></table>`;
-renderer.tablerow = (content) => `<tr style="border-bottom: 1px solid ${T.border};">${content}</tr>`;
-renderer.tablecell = (content, flags) => {
-  const tag = flags.header ? "th" : "td";
-  return `<${tag} style="padding: 8px 12px; text-align: ${flags.align || "left"}; color: ${T.text};">${content}</${tag}>`;
+renderer.table = function(token) {
+  const header = this.parser.parse(token.header);
+  const body = this.parser.parse(token.rows);
+  return `<table style="border-collapse: collapse; width: 100%; margin: 12px 0;"><thead>${header}</thead><tbody>${body}</tbody></table>`;
+};
+
+renderer.tablerow = function(token) {
+  const text = this.parser.parse(token.cells);
+  return `<tr style="border-bottom: 1px solid ${T.border};">${text}</tr>`;
+};
+
+renderer.tablecell = function(token) {
+  const tag = token.header ? "th" : "td";
+  const text = this.parser.parseInline(token.tokens);
+  return `<${tag} style="padding: 8px 12px; text-align: ${token.align || "left"}; color: ${T.text};">${text}</${tag}>`;
 };
 
 marked.setOptions({
