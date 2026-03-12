@@ -102,10 +102,8 @@ export function migrateCollection(raw) {
 
 /**
  * Return a plain serialisable form of a collection for YAML output.
- * Adds lastModifiedBy / lastModifiedAt metadata.
  */
-function serialise(collection, authorName, authorEmail) {
-  const now = new Date().toISOString();
+function serialise(collection) {
   return {
     id:       collection.id,
     name:     collection.name,
@@ -129,9 +127,6 @@ function serialise(collection, authorName, authorEmail) {
       comments:          p.comments || [],
     })),
     prIds: (collection.prIds || []).map(String),
-    lastModifiedBy:  authorName  || "",
-    lastModifiedAt:  now,
-    lastModifiedEmail: authorEmail || "",
   };
 }
 
@@ -151,8 +146,7 @@ export class ADOStorage {
 
   get _project()  { return this.config.project; }
   get _repoId()   { return this.config.repoId; }
-  get _authorName()  { return this.profile?.displayName || "ADO SuperUI"; }
-  get _authorEmail() { return this.profile?.emailAddress || "adosuperui@noreply"; }
+
 
   // ── Read ────────────────────────────────────────────────────────────────────
 
@@ -209,7 +203,7 @@ export class ADOStorage {
    * @returns {Promise<string|null>} fresh objectId, or null if unresolvable
    */
   async save(collection) {
-    const data    = serialise(collection, this._authorName, this._authorEmail);
+    const data    = serialise(collection);
     const content = yaml.dump(data, { lineWidth: 120, quotingType: '"' });
     const path    = collectionPath(collection, this.profile?.id);
     const msg     = `superui: update collection "${collection.name}"`;
@@ -221,9 +215,7 @@ export class ADOStorage {
         path,
         content,
         collection._objectId || null,
-        msg,
-        this._authorName,
-        this._authorEmail
+        msg
       );
     } catch (e) {
       if (e.message?.includes("non-fast-forward") || e.message?.includes("409")) {
@@ -254,9 +246,7 @@ export class ADOStorage {
       path,
       null,          // null content = delete
       collection._objectId || null,
-      msg,
-      this._authorName,
-      this._authorEmail
+      msg
     );
   }
 
