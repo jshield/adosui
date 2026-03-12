@@ -542,10 +542,8 @@ export class ADOClient {
         url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages?path=${encodeURIComponent(pagePath)}&includeContent=true&api-version=7.1`;
       }
       const r = await this._fetch(url);
-      console.log("Wiki content API response:", r);
       return r.content || "";
-    } catch (e) {
-      console.log("Wiki content API error:", e);
+    } catch {
       return "";
     }
   }
