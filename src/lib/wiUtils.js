@@ -76,9 +76,13 @@ export const isInCollection = (collection, type, id) => {
   if (type === "pr") {
     return (collection.prIds || []).includes(sid);
   }
+  if (type === "serviceconnection") {
+    return (collection.serviceConnections || []).some(sc => String(sc.id) === sid);
+  }
   return false;
 };
 
 /* ── ADO URL helpers ───────────────────────────────────────────── */
 export const workItemUrl = (org, id) => `https://dev.azure.com/${encodeURIComponent(org)}/_workitems/edit/${id}`;
 export const pipelineUrl = (org, project, id) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_build?definitionId=${id}`;
+export const serviceConnectionUrl = (org, project, id) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_settings/adminservices?resourceId=${id}`;

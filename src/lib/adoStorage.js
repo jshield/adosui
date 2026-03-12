@@ -90,6 +90,17 @@ export function migrateCollection(raw) {
   if (!Array.isArray(col.prIds)) col.prIds = [];
   col.prIds = col.prIds.map(String);
 
+  // Migrate serviceConnections
+  if (!Array.isArray(col.serviceConnections)) {
+    col.serviceConnections = [];
+  } else {
+    col.serviceConnections = col.serviceConnections.map(sc =>
+      typeof sc === "string"
+        ? { id: sc, comments: [] }
+        : { comments: [], ...sc }
+    );
+  }
+
   // Remove legacy flat arrays to keep the YAML clean
   delete col.repoIds;
   delete col.pipelineIds;
@@ -127,6 +138,12 @@ function serialise(collection) {
       comments:          p.comments || [],
     })),
     prIds: (collection.prIds || []).map(String),
+    serviceConnections: (collection.serviceConnections || []).map(sc => ({
+      id:          String(sc.id),
+      project:     sc.project || "",
+      type:        sc.type || "",
+      comments:    sc.comments || [],
+    })),
   };
 }
 
@@ -285,6 +302,7 @@ export class ADOStorage {
       repos:    [],
       pipelines: [],
       prIds:    [],
+      serviceConnections: [],
     };
   }
 }

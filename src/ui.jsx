@@ -254,6 +254,11 @@ export default function App() {
         const prIds = c.prIds || [];
         return { ...c, prIds: prIds.includes(rid) ? prIds.filter(id => id !== rid) : [...prIds, rid] };
       }
+      if (type === "serviceconnection") {
+        const scs = c.serviceConnections || [];
+        const exists = scs.some(sc => String(sc.id) === rid);
+        return { ...c, serviceConnections: exists ? scs.filter(sc => String(sc.id) !== rid) : [...scs, { id: rid, project: "", type: "", comments: [] }] };
+      }
       return c;
     });
   }, [updateCollection]);
@@ -284,6 +289,16 @@ export default function App() {
             String(p.id) === String(resourceId)
               ? { ...p, comments: [...(p.comments || []), comment] }
               : p
+          ),
+        };
+      }
+      if (resourceType === "serviceconnection") {
+        return {
+          ...c,
+          serviceConnections: (c.serviceConnections || []).map(sc =>
+            String(sc.id) === String(resourceId)
+              ? { ...sc, comments: [...(sc.comments || []), comment] }
+              : sc
           ),
         };
       }
@@ -355,17 +370,19 @@ export default function App() {
     setSearching(true);
     try {
       const lower = q.toLowerCase();
-      const [wi, repos, pipelines, prs] = await Promise.allSettled([
+      const [wi, repos, pipelines, prs, scs] = await Promise.allSettled([
         client.searchWorkItems(q, {}),
         client.getAllRepos(),
         client.getAllPipelines(),
         client.getAllPullRequests(),
+        client.getAllServiceConnections(),
       ]);
       setSearchResults({
-        workItems: wi.status        === "fulfilled" ? wi.value.slice(0, 20)                                                    : [],
-        repos:     repos.status     === "fulfilled" ? repos.value.filter(r => r.name?.toLowerCase().includes(lower)).slice(0, 20)      : [],
-        pipelines: pipelines.status === "fulfilled" ? pipelines.value.filter(p => p.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
-        prs:       prs.status       === "fulfilled" ? prs.value.filter(pr => pr.title?.toLowerCase().includes(lower)).slice(0, 20)    : [],
+        workItems:         wi.status === "fulfilled" ? wi.value.slice(0, 20) : [],
+        repos:             repos.status === "fulfilled" ? repos.value.filter(r => r.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
+        pipelines:         pipelines.status === "fulfilled" ? pipelines.value.filter(p => p.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
+        prs:               prs.status === "fulfilled" ? prs.value.filter(pr => pr.title?.toLowerCase().includes(lower)).slice(0, 20) : [],
+        serviceConnections: scs.status === "fulfilled" ? scs.value.filter(sc => sc.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
       });
     } catch (e) {
       console.error("Search error:", e);

@@ -17,12 +17,14 @@ export function CollectionResources({
   const [repos,      setRepos]      = useState([]);
   const [pipelines,  setPipelines]  = useState([]);
   const [prs,        setPrs]        = useState([]);
+  const [serviceConnections, setServiceConnections] = useState([]);
   const [loading,    setLoading]    = useState(true);
 
-  // Derive the repo/pipeline IDs from the structured objects
+  // Derive the repo/pipeline/service connection IDs from the structured objects
   const repoIds     = (collection.repos     || []).map(r => r.id);
   const pipelineIds = (collection.pipelines || []).map(p => String(p.id));
   const prIds       = collection.prIds || [];
+  const serviceConnectionIds = (collection.serviceConnections || []).map(sc => String(sc.id));
 
   useEffect(() => {
     setLoading(true);
@@ -43,15 +45,20 @@ export function CollectionResources({
         ? client.getAllPullRequests().then(all => all.filter(pr => prIds.includes(String(pr.pullRequestId))))
         : Promise.resolve([]);
 
-      const [wi, r, p, pr] = await Promise.allSettled([wiPromise, reposPromise, pipesPromise, prsPromise]);
-      setWorkItems( wi.status === "fulfilled" ? wi.value : []);
-      setRepos(     r.status  === "fulfilled" ? r.value  : []);
-      setPipelines( p.status  === "fulfilled" ? p.value  : []);
-      setPrs(       pr.status === "fulfilled" ? pr.value : []);
+      const scsPromise = serviceConnectionIds.length > 0
+        ? client.getAllServiceConnections().then(all => all.filter(sc => serviceConnectionIds.includes(String(sc.id))))
+        : Promise.resolve([]);
+
+      const [wi, r, p, pr, scs] = await Promise.allSettled([wiPromise, reposPromise, pipesPromise, prsPromise, scsPromise]);
+      setWorkItems(         wi.status === "fulfilled" ? wi.value : []);
+      setRepos(             r.status  === "fulfilled" ? r.value  : []);
+      setPipelines(         p.status  === "fulfilled" ? p.value  : []);
+      setPrs(               pr.status === "fulfilled" ? pr.value : []);
+      setServiceConnections(scs.status === "fulfilled" ? scs.value : []);
       setLoading(false);
     };
     fetchData();
-  }, [collection.id, JSON.stringify(repoIds), JSON.stringify(pipelineIds), JSON.stringify(prIds), collection.workItemIds?.join(",")]);
+  }, [collection.id, JSON.stringify(repoIds), JSON.stringify(pipelineIds), JSON.stringify(prIds), JSON.stringify(serviceConnectionIds), collection.workItemIds?.join(",")]);
 
   const removeItem = (type, id) => {
     if (type === "workitem") onWorkItemToggle(collection.id, id);
@@ -80,8 +87,9 @@ export function CollectionResources({
   // Lookup comment objects from collection for a given resource type + id
   const getRepoComments     = (id) => (collection.repos     || []).find(r => r.id === String(id))?.comments || [];
   const getPipelineComments = (id) => (collection.pipelines || []).find(p => String(p.id) === String(id))?.comments || [];
+  const getServiceConnectionComments = (id) => (collection.serviceConnections || []).find(sc => String(sc.id) === String(id))?.comments || [];
 
-  const empty = workItems.length === 0 && repos.length === 0 && pipelines.length === 0 && prs.length === 0;
+  const empty = workItems.length === 0 && repos.length === 0 && pipelines.length === 0 && prs.length === 0 && serviceConnections.length === 0;
   const authorName = profile?.displayName || "";
 
   return (
@@ -92,7 +100,7 @@ export function CollectionResources({
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: T.heading }}>{collection.name}</div>
             <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
-              {collection.workItemIds?.length || 0} work items · {repoIds.length} repos · {pipelineIds.length} pipelines · {prIds.length} PRs
+              {collection.workItemIds?.length || 0} work items · {repoIds.length} repos · {pipelineIds.length} pipelines · {prIds.length} PRs · {serviceConnectionIds.length} SVCs
               {collection.scope && (
                 <span style={{ marginLeft: 10, color: collection.scope === "shared" ? T.cyan : T.violet, opacity: 0.7 }}>
                   · {collection.scope}
@@ -218,6 +226,34 @@ export function CollectionResources({
                 </div>
               );
             }} />
+
+            <Group title="Service Connections" items={serviceConnections} renderItem={sc => (
+              <div key={sc.id} style={{ marginBottom: 8 }}>
+                <Card accent={T.cyan}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 13, fontFamily: "'JetBrains Mono'", color: T.text }}>{sc.name}</span>
+                        <Pill label={sc.type || "service"} color={T.cyan} />
+                      </div>
+                      {sc.description && (
+                        <div style={{ marginTop: 4, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>{sc.description}</div>
+                      )}
+                      {onAddComment && (
+                        <CommentThread
+                          comments={getServiceConnectionComments(sc.id)}
+                          onAdd={(text) => onAddComment(collection.id, "serviceconnection", sc.id, text)}
+                          authorName={authorName}
+                          disabled={syncStatus === "saving"}
+                        />
+                      )}
+                    </div>
+                    <RemoveBtn type="serviceconnection" id={sc.id} />
+                  </div>
+                </Card>
+              </div>
+            )
+	    }/>
 
             {empty && (
               <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'", textAlign: "center", padding: 40 }}>

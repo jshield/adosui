@@ -158,6 +158,11 @@ class BackgroundWorker {
       const testRuns = await this.client.getTestRuns(projectName);
       cache.set(keyPrefix + "testRuns", testRuns, CACHE_TTL);
     } catch (e) {}
+
+    try {
+      const serviceConnections = await this.client.getServiceConnections(projectName);
+      cache.set(keyPrefix + "serviceConnections", serviceConnections, CACHE_TTL);
+    } catch (e) {}
   }
 }
 

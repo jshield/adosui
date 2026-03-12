@@ -199,6 +199,22 @@ export class ADOClient {
     });
   }
 
+  async getAllServiceConnections(forceRefresh = false) {
+    if (forceRefresh) cache.invalidate("serviceconnections-");
+    return this._cachedFetch("serviceconnections-all", async () => {
+      if (!this._projects.length) await this.getProjects();
+      const all = [];
+      for (const p of this._projects.slice(0, 10)) {
+        try {
+          const scs = await this.getServiceConnections(p.name);
+          scs.forEach(sc => { sc._projectName = p.name; });
+          all.push(...scs);
+        } catch {}
+      }
+      return all;
+    });
+  }
+
   async getRepos(project) {
     const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/git/repositories?api-version=7.1`);
     return r.value || [];
@@ -227,6 +243,13 @@ export class ADOClient {
   async getTestRuns(project) {
     try {
       const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/test/runs?api-version=7.1&$top=20&includeRunDetails=true`);
+      return r.value || [];
+    } catch { return []; }
+  }
+
+  async getServiceConnections(project) {
+    try {
+      const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/serviceendpoint/endpoints?api-version=7.1&$top=50`);
       return r.value || [];
     } catch { return []; }
   }

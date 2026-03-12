@@ -10,7 +10,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
     return <EmptyState icon="🔍" message="Type to search all resources" />;
   }
 
-  const total = results.workItems.length + results.repos.length + results.pipelines.length + results.prs.length;
+  const total = results.workItems.length + results.repos.length + results.pipelines.length + results.prs.length + results.serviceConnections.length;
   if (total === 0) {
     return <EmptyState icon="∅" message={`No results for "${searchQuery}"`} />;
   }
@@ -116,6 +116,30 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                     onClick={e => { e.stopPropagation(); onResourceToggle("pr", pr.pullRequestId, collection.id); }}
                     style={{ background: isInCollection(collection, "pr", pr.pullRequestId) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "pr", pr.pullRequestId) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "pr", pr.pullRequestId) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
                   >{isInCollection(collection, "pr", pr.pullRequestId) ? "✓" : "+"}</button>
+                )}
+              </SelectableRow>
+            );
+          })}
+        </>
+      )}
+
+      {results.serviceConnections.length > 0 && (
+        <>
+          <SectionLabel count={results.serviceConnections.length}>SERVICE CONNECTIONS</SectionLabel>
+          {results.serviceConnections.map(sc => {
+            const sel = isSelected("serviceconnection", sc.id);
+            return (
+              <SelectableRow key={sc.id} sel={sel} onClick={() => onSelect({ type: "serviceconnection", item: sc })}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: T.cyan, fontFamily: "'JetBrains Mono'", background: `${T.cyan}22`, borderRadius: 3, padding: "1px 5px", flexShrink: 0 }}>SVC</span>
+                  <span style={{ fontSize: 12, flex: 1, color: T.cyan, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sc.name}</span>
+                  <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>{sc.type || ""}</span>
+                </div>
+                {collection && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onResourceToggle("serviceconnection", sc.id, collection.id); }}
+                    style={{ background: isInCollection(collection, "serviceconnection", sc.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "serviceconnection", sc.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "serviceconnection", sc.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
+                  >{isInCollection(collection, "serviceconnection", sc.id) ? "✓" : "+"}</button>
                 )}
               </SelectableRow>
             );

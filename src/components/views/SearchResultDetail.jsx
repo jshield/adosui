@@ -1,6 +1,6 @@
 import { T } from "../../lib/theme";
 import { Field, AdoLink } from "../ui";
-import { isInCollection, timeAgo, branchName, workItemUrl } from "../../lib";
+import { isInCollection, timeAgo, branchName, workItemUrl, serviceConnectionUrl } from "../../lib";
 
 export function SearchResultDetail({ result, collection, org, onWorkItemToggle, onResourceToggle }) {
   if (!result) return null;
@@ -12,6 +12,7 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
     if (type === "repo")     return isInCollection(collection, "repo", item.id);
     if (type === "pipeline") return isInCollection(collection, "pipeline", item.id);
     if (type === "pr")       return isInCollection(collection, "pr", item.pullRequestId);
+    if (type === "serviceconnection") return isInCollection(collection, "serviceconnection", item.id);
     return false;
   };
   const added = getInCollection();
@@ -22,6 +23,7 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
     else if (type === "repo")      onResourceToggle("repo",     item.id,              collection.id);
     else if (type === "pipeline")  onResourceToggle("pipeline", item.id,              collection.id);
     else if (type === "pr")        onResourceToggle("pr",       item.pullRequestId,   collection.id);
+    else if (type === "serviceconnection") onResourceToggle("serviceconnection", item.id, collection.id);
   };
 
   const containerStyle = { flex: 1, overflowY: "auto", padding: 24 };
@@ -131,6 +133,29 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
           <Field label="Target Branch" value={target} />
           <Field label="Created"       value={created} />
           {reviewers && <Field label="Reviewers" value={reviewers} />}
+          {item.description && <Field label="Description" value={item.description} />}
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "serviceconnection") {
+    const project = item._projectName || item.project || "";
+    const authScheme = item.authorization?.scheme || item.type || "Unknown";
+    return (
+      <div style={containerStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: T.cyan, background: `${T.cyan}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>SVC</span>
+          <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>{item.type || "service"}</span>
+        </div>
+        <div style={{ fontSize: 17, fontWeight: 600, color: T.cyan, marginBottom: 14, lineHeight: 1.35 }}>{item.name}</div>
+        <ToggleSection />
+        {project && <AdoLink href={serviceConnectionUrl(org, project, item.id)} />}
+        <div>
+          <Field label="ID"          value={item.id || "—"} />
+          <Field label="Type"       value={item.type || "—"} />
+          <Field label="Authorization" value={authScheme} />
+          <Field label="Project"    value={project || "—"} />
           {item.description && <Field label="Description" value={item.description} />}
         </div>
       </div>

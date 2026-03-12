@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl } from "../../lib";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, serviceConnectionUrl } from "../../lib";
 
 export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
   const { type, data } = resource;
@@ -17,6 +17,9 @@ export function ResourceDetail({ client, resource, org, collection, profile, onR
   }
   if (type === "pr") {
     return <PRDetail client={client} pr={data} collection={collection} org={org} profile={profile} onResourceToggle={onResourceToggle} syncStatus={syncStatus} />;
+  }
+  if (type === "serviceconnection") {
+    return <ServiceConnectionDetail client={client} serviceConnection={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   return null;
 }
@@ -280,6 +283,69 @@ function PRDetail({ client, pr, collection, org, profile, onResourceToggle, sync
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ServiceConnectionDetail({ client, serviceConnection, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+  const project = serviceConnection._projectName || serviceConnection.project || "";
+
+  const handleToggle = () => {
+    if (!collection || !onResourceToggle) return;
+    onResourceToggle("serviceconnection", serviceConnection.id, collection.id);
+  };
+
+  const authScheme = serviceConnection.authorization?.scheme || serviceConnection.type || "Unknown";
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ padding: "18px 24px 16px", borderBottom: `1px solid ${T.border}`, background: T.panel, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+              <Pill label={serviceConnection.type || "service"} color={T.cyan} />
+            </div>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: T.heading, marginBottom: 8 }}>{serviceConnection.name}</div>
+            {serviceConnection.description && (
+              <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
+                {serviceConnection.description}
+              </div>
+            )}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {project && <AdoLink href={serviceConnectionUrl(org, project, serviceConnection.id)} />}
+            {collection && <ToggleBtn added={isInCollection(collection, "serviceconnection", serviceConnection.id)} color={collection.color} onClick={handleToggle} />}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+        <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+          {[
+            ["ID", serviceConnection.id || "—"],
+            ["Type", serviceConnection.type || "—"],
+            ["Authorization", authScheme],
+            ["Project", project || "—"],
+            ["URL", serviceConnection.url || "—"],
+            ["Created", serviceConnection.createdBy ? (serviceConnection.createdBy.displayName + " · " + timeAgo(serviceConnection.createdOn)) : timeAgo(serviceConnection.createdOn)],
+          ].map(([label, val]) => (
+            <div key={label} style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+              <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>{label}</span>
+              <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'", wordBreak: "break-all", fontSize: 11 }}>{val}</span>
+            </div>
+          ))}
+        </div>
+        {collection && onAddComment && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+            <CommentThread
+              comments={(collection.serviceConnections || []).find(sc => String(sc.id) === String(serviceConnection.id))?.comments || []}
+              onAdd={(text) => onAddComment(collection.id, "serviceconnection", serviceConnection.id, text)}
+              authorName={profile?.displayName || ""}
+              disabled={syncStatus === "saving"}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
