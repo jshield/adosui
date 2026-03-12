@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Dot, SelectableRow, Field } from "../ui";
 import { timeAgo, pipelineStatus, branchName, pipelineUrl, cache } from "../../lib";
+import backgroundWorker from "../../lib/backgroundWorker";
 import { ResourceDetail } from "./ResourceDetail";
 
 /**
@@ -24,6 +25,7 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPipeline, setSelectedPipeline] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [lastRunsRefresh, setLastRunsRefresh] = useState(null);
 
   const fetchPipelines = useCallback(async () => {
     setLoading(true);
@@ -77,6 +79,14 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
   }, [client, pinnedPipelines, allPipelines]);
 
   useEffect(() => { fetchPipelines(); }, [fetchPipelines]);
+
+  // Subscribe to background worker to get last pipeline runs refresh timestamp
+  useEffect(() => {
+    const unsub = backgroundWorker.subscribe((st) => {
+      setLastRunsRefresh(st.lastPipelineRunsRefresh || null);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     if (allPipelines.length) {
