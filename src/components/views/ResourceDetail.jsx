@@ -277,6 +277,19 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
   useEffect(() => {
     if (!pipeline?._projectName || !pipeline?.id) return;
     setRunsLoading(true);
+    // Prefer cached runs from background worker to avoid duplicate network calls
+    try {
+      const cached = cache.get(`project:${pipeline._projectName}:pipelineRuns`) || {};
+      const key = String(pipeline.id);
+      if (cached && Array.isArray(cached[key]) && cached[key].length) {
+        setRuns(cached[key]);
+        setRunsLoading(false);
+        return;
+      }
+    } catch (e) {
+      // fall through to direct fetch
+    }
+
     const configType = pipeline.configuration?.type || "yaml";
     const fetch = configType === "yaml"
       ? client.getPipelineRuns(pipeline._projectName, pipeline.id)
@@ -287,7 +300,9 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
       .finally(() => setRunsLoading(false));
   }, [pipeline, client]);
 
-  // Normalize branch extraction from a run by checking multiple possible fields
+  // Prefer cached run helpers when available; fall back to local extraction.
+  // We intentionally avoid importing wiUtils here to keep this file self-contained
+  // but use a resilient branch extraction when a run object is available.
   const getRunBranch = (run) => {
     if (!run) return "unknown";
     return (

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Dot, SelectableRow, Field } from "../ui";
-import { timeAgo, pipelineStatus, branchName, pipelineUrl, cache } from "../../lib";
+import { timeAgo, pipelineStatus, branchName, pipelineUrl, cache, getLatestRun, getRunBranch, getRunStatusVal } from "../../lib";
 import backgroundWorker from "../../lib/backgroundWorker";
 import { ResourceDetail } from "./ResourceDetail";
 
@@ -42,32 +42,32 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
   const fetchRuns = useCallback(async () => {
     if (!allPipelines.length || !pinnedPipelines.length) return;
     setRefreshing(true);
-    const runsMap = {};
     try {
-      // Try to read cached runs first (populated by background worker)
+      // Read cached runs produced by the background worker for each pipeline's project
+      const runsMap = { ...pipelineRuns };
       await Promise.all(pinnedPipelines.map(async (p) => {
         try {
           const pipeline = allPipelines.find(pl => String(pl.id) === String(p.id));
           const projectName = p.project || pipeline?._projectName;
-          if (!projectName) { runsMap[p.id] = null; return; }
+          if (!projectName) { runsMap[String(p.id)] = []; return; }
 
           const cached = cache.get(`project:${projectName}:pipelineRuns`) || {};
-          if (cached && Object.prototype.hasOwnProperty.call(cached, p.id)) {
-            runsMap[p.id] = cached[p.id];
+          // Normalize key lookup to strings
+          if (cached && Object.prototype.hasOwnProperty.call(cached, String(p.id))) {
+            runsMap[String(p.id)] = cached[String(p.id)] || [];
             return;
           }
 
-          // Fallback to direct API call if cache miss
-          const configType  = p.configurationType || pipeline?.configuration?.type;
+          // Fallback: fetch builds directly (prefer builds endpoint)
           let runs = [];
-          if (configType === "yaml") {
-            runs = await client.getPipelineRuns(projectName, p.id);
-          } else {
+          try {
             runs = await client.getBuildRuns(projectName, p.id);
+          } catch (err) {
+            try { runs = await client.getPipelineRuns(projectName, p.id); } catch { runs = []; }
           }
-          runsMap[p.id] = runs[0] || null;
+          runsMap[String(p.id)] = runs || [];
         } catch (err) {
-          runsMap[p.id] = null;
+          runsMap[String(p.id)] = [];
         }
       }));
       setPipelineRuns(runsMap);
@@ -80,13 +80,80 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
 
   useEffect(() => { fetchPipelines(); }, [fetchPipelines]);
 
-  // Subscribe to background worker to get last pipeline runs refresh timestamp
+  // Manual refresh that batches builds requests for visible (pinned) pipelines
+  const handleManualRefresh = useCallback(async () => {
+    if (!pinnedPipelines.length || !allPipelines.length) return;
+    setRefreshing(true);
+    try {
+      // Group pinned pipelines by project so we can batch per-project requests
+      const byProject = {};
+      for (const p of pinnedPipelines) {
+        const pipeline = allPipelines.find(pl => String(pl.id) === String(p.id));
+        const projectName = p.project || pipeline?._projectName;
+        if (!projectName) continue;
+        byProject[projectName] = byProject[projectName] || [];
+        byProject[projectName].push(String(p.id));
+      }
+
+      const CHUNK_DEFS = 20;
+      const PER_DEF = 3;
+      const MANUAL_TTL = 60 * 1000; // match worker RUNS_TTL
+
+      for (const [projectName, defIds] of Object.entries(byProject)) {
+        const projectRunsMap = {};
+        for (let i = 0; i < defIds.length; i += CHUNK_DEFS) {
+          const chunk = defIds.slice(i, i + CHUNK_DEFS);
+          try {
+            const map = await client.getBuildRunsForDefinitions(projectName, chunk, PER_DEF);
+            for (const k of Object.keys(map)) projectRunsMap[String(k)] = map[k] || [];
+          } catch (e) {
+            // Fallback per-definition if batched call fails
+            await Promise.all(chunk.map(async (defId) => {
+              try {
+                let runs = await client.getBuildRuns(projectName, defId);
+                if (!runs || !runs.length) {
+                  runs = await client.getPipelineRuns(projectName, defId);
+                }
+                projectRunsMap[String(defId)] = runs || [];
+              } catch (err) {
+                projectRunsMap[String(defId)] = [];
+              }
+            }));
+          }
+        }
+        // Persist per-project pipeline runs into cache with same key the worker uses
+        cache.set(`project:${projectName}:pipelineRuns`, projectRunsMap, MANUAL_TTL);
+        // Merge newly cached runs into local state
+        const cached = cache.get(`project:${projectName}:pipelineRuns`) || {};
+        setPipelineRuns(prev => ({ ...prev, ...Object.fromEntries(Object.entries(cached).map(([k,v]) => [String(k), v || []])) }));
+      }
+
+      // Signal a refresh time so UI shows "Runs refreshed:"
+      try {
+        backgroundWorker.lastPipelineRunsRefresh = new Date().toISOString();
+        backgroundWorker.notify();
+      } catch (e) {}
+    } catch (e) {
+      console.error("Manual refresh failed:", e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [client, pinnedPipelines, allPipelines]);
+
+  // Subscribe to background worker: on runs refresh re-load cached runs for visible projects
   useEffect(() => {
     const unsub = backgroundWorker.subscribe((st) => {
       setLastRunsRefresh(st.lastPipelineRunsRefresh || null);
+      // Re-read cache for projects present in allPipelines
+      const projects = Array.from(new Set(allPipelines.map(p => p._projectName).filter(Boolean)));
+      for (const projectName of projects) {
+        const cached = cache.get(`project:${projectName}:pipelineRuns`) || {};
+        // Merge into local state
+        setPipelineRuns(prev => ({ ...prev, ...Object.fromEntries(Object.entries(cached).map(([k,v]) => [String(k), v || []])) }));
+      }
     });
     return unsub;
-  }, []);
+  }, [allPipelines]);
 
   useEffect(() => {
     if (allPipelines.length) {
@@ -101,7 +168,11 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
   );
   const pinnedIds = new Set(pinnedPipelines.map(p => String(p.id)));
 
-  const getPipelineRun = (pipeline) => pipelineRuns[String(pipeline.id)] || pipeline.latestRun || null;
+  const getPipelineRun = (pipeline) => {
+    const cached = pipelineRuns[String(pipeline.id)];
+    if (cached) return getLatestRun(cached);
+    return pipeline.latestRun || null;
+  };
 
   const renderList = () => {
     if (loading) return <div style={{ padding: 20, color: T.dim }}>Loading...</div>;
@@ -121,22 +192,20 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
               </button>
             </div>
             {pinnedPipelines.map((p) => {
-               const run    = pipelineRuns[String(p.id)];
-               // For run objects, pipelineStatus now accepts the object, but
-               // prefer extracting a status string when available to keep labels
-               // consistent.
-               const status = pipelineStatus(run?.result || run?.state || run?.status || run);
+               const pipeline = allPipelines.find(x => String(x.id) === String(p.id)) || p;
+               const runObj = getPipelineRun(pipeline);
+               const status = pipelineStatus(getRunStatusVal(runObj));
               const sel    = selectedPipeline && String(selectedPipeline.id) === String(p.id);
               return (
                 <div key={p.id}
-                  onClick={() => setSelectedPipeline(allPipelines.find(x => String(x.id) === String(p.id)) || p)}
+                  onClick={() => setSelectedPipeline(pipeline)}
                   style={{ display: "flex", alignItems: "center", padding: "8px 14px", cursor: "pointer", borderBottom: `1px solid ${T.border}`, borderLeft: `3px solid ${sel ? T.amber : "transparent"}`, background: sel ? `${T.amber}08` : "transparent" }}>
                   <Dot color={status.color} pulse={status.pulse} />
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                 <span style={{ fontSize: 12 }}>{p.name}</span>
-                {run && (
+                {runObj && (
                   <span style={{ fontSize: 10, color: T.dim }}>
-                    {branchName(run.sourceBranch || run.sourceRefName || run.repository?.refName || run.repository?.branch || run.resources?.repositories?.self?.refName)} · {timeAgo(run.startTime || run.queueTime)}
+                    {getRunBranch(runObj)} · {timeAgo(runObj.startTime || runObj.queueTime)}
                   </span>
                 )}
               </div>
@@ -156,8 +225,9 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
         </div>
           {filteredPipelines.slice(0, 50).map((p) => {
            const pinned = pinnedIds.has(String(p.id));
-           const run    = getPipelineRun(p);
-           const status = pipelineStatus(run?.result || run?.state || run?.status || run);
+           const pipeline = p;
+           const runObj = getPipelineRun(pipeline);
+           const status = pipelineStatus(getRunStatusVal(runObj));
           const sel    = selectedPipeline && String(selectedPipeline.id) === String(p.id);
           return (
             <div key={p.id} onClick={() => setSelectedPipeline(p)}
@@ -165,9 +235,9 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
               {pinned && <Dot color={status.color} />}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', marginLeft: pinned ? 0 : 12 }}>
                 <span style={{ fontSize: 11 }}>{p.name}</span>
-                {run && (
+                {runObj && (
                   <span style={{ fontSize: 10, color: T.dim }}>
-                    {branchName(run.sourceBranch || run.sourceRefName || run.repository?.refName || run.resources?.repositories?.self?.refName)} · {timeAgo(run.startTime || run.queueTime)}
+                    {getRunBranch(runObj)} · {timeAgo(runObj.startTime || runObj.queueTime)}
                   </span>
                 )}
               </div>

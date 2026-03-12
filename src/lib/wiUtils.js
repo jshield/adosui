@@ -104,3 +104,23 @@ export const wikiPageUrl = (org, project, wikiId, pagePath) => {
 export const repoUrl = (org, project, repoName) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_git/${encodeURIComponent(repoName)}`;
 
 export const prUrl = (org, project, pullRequestId) => `https://dev.azure.com/${encodeURIComponent(org)}/${encodeURIComponent(project)}/_git/pullrequests/${pullRequestId}`;
+
+/* ── Run helpers ─────────────────────────────────────────────────────────── */
+export const getLatestRun = (val) => {
+  if (!val) return null;
+  if (Array.isArray(val)) return val[0] || null;
+  return val;
+};
+
+export const getRunBranch = (run) => {
+  if (!run) return "";
+  return branchName(
+    run.sourceBranch || run.sourceRefName || run.repository?.refName || run.repository?.branch || run.resources?.repositories?.self?.refName || ""
+  );
+};
+
+export const getRunStatusVal = (run) => {
+  if (!run) return "";
+  if (Array.isArray(run)) run = run[0] || null;
+  return (run && (run.result || run.state || run.status)) || "";
+};
