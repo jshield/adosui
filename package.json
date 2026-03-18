@@ -11,11 +11,17 @@
     "server": "node ado-server.js"
   },
   "dependencies": {
+    "@microsoft/signalr": "^10.0.0",
+    "dagre": "^0.8.5",
+    "dexie": "^4.3.0",
+    "dexie-react-hooks": "^4.2.0",
     "hkdf": "0.0.2",
     "js-yaml": "^4.1.1",
     "marked": "^17.0.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-virtualized-auto-sizer": "^2.0.3",
+    "react-window": "^2.2.7"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
