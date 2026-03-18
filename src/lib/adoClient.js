@@ -605,6 +605,102 @@ export class ADOClient {
     }
   }
 
+  // ── Pipeline Timeline & Logs API ─────────────────────────────────────────
+
+  async _fetchText(url, opts = {}) {
+    const res = await fetch(url, {
+      method: opts.method || "GET",
+      headers: { ...this._getHeaders(opts), Accept: "text/plain" },
+    });
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
+      throw new Error(`${res.status}: ${msg}`);
+    }
+    return res.text();
+  }
+
+  async getBuildTimeline(project, buildId) {
+    const r = await this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/build/builds/${encodeURIComponent(buildId)}/timeline?api-version=7.1`
+    );
+    return r;
+  }
+
+  async getBuildLogs(project, buildId) {
+    const r = await this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/build/builds/${encodeURIComponent(buildId)}/logs?api-version=7.1`
+    );
+    return r.value || [];
+  }
+
+  async getBuildLog(project, buildId, logId) {
+    return this._fetchText(
+      `${this.base}/${encodeURIComponent(project)}/_apis/build/builds/${encodeURIComponent(buildId)}/logs/${encodeURIComponent(logId)}?api-version=7.1`
+    );
+  }
+
+  async getBuildLogRange(project, buildId, logId, startLine, endLine) {
+    return this._fetchText(
+      `${this.base}/${encodeURIComponent(project)}/_apis/build/builds/${encodeURIComponent(buildId)}/logs/${encodeURIComponent(logId)}?startLine=${startLine}&endLine=${endLine}&api-version=7.1`
+    );
+  }
+
+  async getPipelineRun(project, pipelineId, runId) {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/pipelines/${encodeURIComponent(pipelineId)}/runs/${encodeURIComponent(runId)}?api-version=7.1`
+    );
+  }
+
+  async getPipelineRunArtifacts(project, pipelineId, runId) {
+    try {
+      const r = await this._fetch(
+        `${this.base}/${encodeURIComponent(project)}/_apis/pipelines/${encodeURIComponent(pipelineId)}/runs/${encodeURIComponent(runId)}/artifacts?api-version=7.1`
+      );
+      return r.value || [];
+    } catch { return []; }
+  }
+
+  async getEnvironment(project, envId) {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/distributedtask/environments/${encodeURIComponent(envId)}?api-version=7.1`
+    );
+  }
+
+  async getVariableGroup(project, groupId) {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/distributedtask/variablegroups/${encodeURIComponent(groupId)}?api-version=7.1`
+    );
+  }
+
+  async getServiceEndpoint(project, endpointId) {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/serviceendpoint/endpoints/${encodeURIComponent(endpointId)}?api-version=7.1`
+    );
+  }
+
+  /**
+   * Get the Azure DevOps organization instance ID (for SignalR contextToken).
+   * Cached since it never changes for a given org.
+   */
+  async getOrganizationId() {
+    return this._cachedFetch("org-instance-id", async () => {
+      const r = await this._fetch(`${this.base}/_apis/connectionData?api-version=7.1-preview`);
+      return r.instanceId;
+    });
+  }
+
+  /**
+   * Get the project GUID from a project name.
+   */
+  async getProjectId(projectName) {
+    if (!this._projects.length) await this.getProjects();
+    const p = this._projects.find(
+      (proj) => proj.name.toLowerCase() === projectName.toLowerCase()
+    );
+    return p?.id || null;
+  }
+
   async addWikiPageComment(wikiId, pageId, text) {
     const url = `${this.base}/_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages/${encodeURIComponent(pageId)}/comments?api-version=7.1`;
     const r = await this._fetch(url, {
