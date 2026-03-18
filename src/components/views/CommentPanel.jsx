@@ -14,9 +14,10 @@ function timeAgo(dateStr) {
   return `${days}d ago`;
 }
 
-function CommentItem({ comment, onResolve, onDelete }) {
+function CommentItem({ comment, onResolve, onDelete, onClick }) {
   return (
     <div
+      onClick={() => onClick?.(comment)}
       style={{
         padding: "8px 10px",
         marginBottom: 6,
@@ -24,6 +25,7 @@ function CommentItem({ comment, onResolve, onDelete }) {
         border: `1px solid ${comment.resolved ? T.border : "rgba(245,158,11,0.15)"}`,
         borderRadius: 6,
         opacity: comment.resolved ? 0.5 : 1,
+        cursor: "pointer",
       }}
     >
       {/* Header */}
@@ -104,6 +106,7 @@ export function CommentPanel({
   onAddComment,
   onResolveComment,
   onDeleteComment,
+  onCommentClick,
   onClose,
   authorName,
   disabled,
@@ -190,6 +193,7 @@ export function CommentPanel({
               comment={c}
               onResolve={onResolveComment}
               onDelete={onDeleteComment}
+              onClick={onCommentClick}
             />
           ))
         ) : (

@@ -1,13 +1,15 @@
 import React, { useRef, useEffect, useCallback, useState } from "react";
 import { T } from "../../lib/theme";
 
+const LINE_HEIGHT = 20;
+
 function LogLine({ line, index, isSelected, hasComment, isSelecting, onMouseDown, onMouseEnter }) {
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        height: 20,
+        height: LINE_HEIGHT,
         background: isSelected ? "rgba(245,158,11,0.12)" : "transparent",
         userSelect: isSelecting ? "none" : "auto",
       }}
@@ -77,6 +79,7 @@ export function LogViewer({
   commentedLines,
   onLineSelect,
   noLogMessage,
+  scrollToLine,
 }) {
   const containerRef = useRef(null);
   const prevLenRef = useRef(0);
@@ -95,6 +98,15 @@ export function LogViewer({
     }
     prevLenRef.current = lines.length;
   }, [lines.length, connectionStatus]);
+
+  // Scroll to a specific line when requested (e.g. clicking a comment)
+  useEffect(() => {
+    if (scrollToLine != null && containerRef.current) {
+      const targetTop = scrollToLine * LINE_HEIGHT;
+      // Offset by 3 lines so there's context above the target
+      containerRef.current.scrollTop = Math.max(0, targetTop - LINE_HEIGHT * 3);
+    }
+  }, [scrollToLine]);
 
   const handleMouseDown = useCallback((index, e) => {
     if (e.button !== 0) return;
@@ -141,7 +153,7 @@ export function LogViewer({
       onMouseLeave={handleMouseUp}
       style={{
         flex: 1,
-        minHeight: 200,
+        minHeight: 0,
         overflowY: "auto",
         background: T.bg,
         borderRadius: 4,

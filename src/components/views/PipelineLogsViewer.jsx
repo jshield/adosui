@@ -35,6 +35,7 @@ export function PipelineLogsViewer({
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [selectedTaskLogId, setSelectedTaskLogId] = useState(null);
   const [lineSelection, setLineSelection] = useState(null);
+  const [scrollToLine, setScrollToLine] = useState(null);
   const [showComments, setShowComments] = useState(false);
   const [localComments, setLocalComments] = useState([]);
 
@@ -141,8 +142,38 @@ export function PipelineLogsViewer({
 
   const handleLineSelect = useCallback((range) => {
     setLineSelection(range);
+    setScrollToLine(null); // clear any previous scroll target
     setShowComments(true);
   }, []);
+
+  const handleCommentClick = useCallback(
+    (comment) => {
+      const refs = comment.lineRefs || [];
+      if (!refs.length || !lines?.length) return;
+
+      // Parse first and last lineRef to get line numbers
+      const parseLine = (ref) => {
+        const lastDash = ref.lastIndexOf("-");
+        return lastDash >= 0 ? parseInt(ref.substring(lastDash + 1), 10) : NaN;
+      };
+
+      const firstNum = parseLine(refs[0]);
+      const lastNum = parseLine(refs[refs.length - 1]);
+      if (isNaN(firstNum)) return;
+
+      // Find 0-based indices in the lines array
+      const startIdx = lines.findIndex((l) => l.lineNumber === firstNum);
+      const endIdx = !isNaN(lastNum)
+        ? lines.findIndex((l) => l.lineNumber === lastNum)
+        : startIdx;
+
+      if (startIdx >= 0) {
+        setLineSelection({ start: startIdx, end: endIdx >= 0 ? endIdx : startIdx });
+        setScrollToLine(startIdx);
+      }
+    },
+    [lines]
+  );
 
   const handleAddComment = useCallback(
     (text) => {
@@ -392,7 +423,7 @@ export function PipelineLogsViewer({
 
           {/* Log viewer */}
           <ErrorBoundary label="Log Viewer">
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 8 }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 8, overflow: "hidden", minHeight: 0 }}>
               {selectedTaskId ? (
                 <LogViewer
                   lines={lines || []}
@@ -401,6 +432,7 @@ export function PipelineLogsViewer({
                   selectedRange={lineSelection}
                   commentedLines={commentedLines}
                   onLineSelect={handleLineSelect}
+                  scrollToLine={scrollToLine}
                   noLogMessage={
                     selectedTaskLogId
                       ? undefined
@@ -436,6 +468,7 @@ export function PipelineLogsViewer({
             onAddComment={handleAddComment}
             onResolveComment={handleResolveComment}
             onDeleteComment={handleDeleteComment}
+            onCommentClick={handleCommentClick}
             onClose={() => setShowComments(false)}
             authorName={profile?.displayName || ""}
             disabled={syncStatus === "saving"}
