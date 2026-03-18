@@ -114,7 +114,7 @@ export function PipelineLogsViewer({
     (nodeId) => {
       // Only job nodes are clickable
       const record = timeline?.records?.find(
-        (r) => r.id === nodeId && r.recordType === "Job"
+        (r) => r.id === nodeId && r.type === "Job"
       );
       if (record) {
         setSelectedJobId(nodeId);
@@ -339,8 +339,9 @@ export function PipelineLogsViewer({
               {timeline.records
                 .filter(
                   (r) =>
-                    r.recordType === "Task" && r.parentId === selectedJobId
+                    r.type === "Task" && r.parentId === selectedJobId
                 )
+                .sort((a, b) => (a.order || 0) - (b.order || 0))
                 .map((task) => {
                   const status = getRecordStatus(task);
                   const color =
@@ -350,12 +351,13 @@ export function PipelineLogsViewer({
                       inProgress: T.amber,
                     }[status] || T.muted;
                   const isActive = task.id === selectedTaskId;
+                  const taskLogId = task.log?.id;
 
                   return (
                     <button
                       key={task.id}
                       onClick={() =>
-                        handleSelectTask(task.id, task.logId)
+                        handleSelectTask(task.id, taskLogId)
                       }
                       style={{
                         background: isActive ? "rgba(245,158,11,0.08)" : "none",
@@ -364,8 +366,8 @@ export function PipelineLogsViewer({
                         fontSize: 10,
                         padding: "3px 8px",
                         borderRadius: 4,
-                        cursor: task.logId ? "pointer" : "default",
-                        opacity: task.logId ? 1 : 0.4,
+                        cursor: taskLogId ? "pointer" : "default",
+                        opacity: taskLogId ? 1 : 0.4,
                         display: "flex",
                         alignItems: "center",
                         gap: 4,

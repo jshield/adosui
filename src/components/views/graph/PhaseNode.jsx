@@ -11,8 +11,20 @@ const STATUS_COLORS = {
   succeededWithIssues: T.amber,
 };
 
-export function PhaseNode({ node }) {
+export function PhaseNode({ node, isStage }) {
   const color = STATUS_COLORS[node.status] || T.muted;
+
+  // Stages use a solid border and slightly different styling
+  const borderStyle = isStage ? `2px solid ${color}` : `1px dashed ${color}`;
+  const bg = isStage ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.02)";
+
+  const countLabel = isStage
+    ? node.data.phaseCount > 0
+      ? `${node.data.phaseCount} phase${node.data.phaseCount !== 1 ? "s" : ""}`
+      : null
+    : node.data.jobCount > 0
+    ? `${node.data.jobCount} job${node.data.jobCount !== 1 ? "s" : ""}`
+    : null;
 
   return (
     <div
@@ -20,9 +32,9 @@ export function PhaseNode({ node }) {
         width: node.width,
         height: node.height,
         padding: "6px 12px",
-        border: `1px dashed ${color}`,
-        borderRadius: 10,
-        background: "rgba(255,255,255,0.02)",
+        border: borderStyle,
+        borderRadius: isStage ? 12 : 10,
+        background: bg,
         boxSizing: "border-box",
         display: "flex",
         alignItems: "center",
@@ -31,28 +43,30 @@ export function PhaseNode({ node }) {
     >
       <div
         style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
+          width: isStage ? 10 : 8,
+          height: isStage ? 10 : 8,
+          borderRadius: isStage ? 3 : "50%",
           background: color,
           flexShrink: 0,
         }}
       />
       <div
         style={{
-          fontWeight: 600,
-          fontSize: 11,
-          color: T.text,
+          fontWeight: isStage ? 700 : 600,
+          fontSize: isStage ? 12 : 11,
+          color: isStage ? T.heading : T.text,
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
+          textTransform: isStage ? "uppercase" : "none",
+          letterSpacing: isStage ? "0.03em" : "normal",
         }}
       >
         {node.name}
       </div>
-      {node.data.jobCount > 0 && (
+      {countLabel && (
         <div style={{ fontSize: 9, color: T.muted, flexShrink: 0 }}>
-          {node.data.jobCount} job{node.data.jobCount !== 1 ? "s" : ""}
+          {countLabel}
         </div>
       )}
     </div>

@@ -25,19 +25,20 @@ const STATUS_ICONS = {
 function TaskItem({ task, isSelected, onSelect }) {
   const status = getRecordStatus(task);
   const color = STATUS_COLORS[status] || T.muted;
+  const taskLogId = task.log?.id;
 
   return (
     <div
-      onClick={() => onSelect(task.id, task.logId)}
+      onClick={() => onSelect(task.id, taskLogId)}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 6,
-        padding: "3px 8px 3px 40px",
-        cursor: task.logId ? "pointer" : "default",
+        padding: "3px 8px 3px 52px",
+        cursor: taskLogId ? "pointer" : "default",
         background: isSelected ? "rgba(245,158,11,0.08)" : "transparent",
         borderLeft: isSelected ? `2px solid ${T.amber}` : "2px solid transparent",
-        opacity: task.logId ? 1 : 0.5,
+        opacity: taskLogId ? 1 : 0.5,
       }}
     >
       <span style={{ fontSize: 10, color, width: 12, textAlign: "center", flexShrink: 0 }}>
@@ -92,7 +93,7 @@ function JobItem({ job, isSelected, selectedTaskId, onSelectJob, onSelectTask })
           display: "flex",
           alignItems: "center",
           gap: 6,
-          padding: "4px 8px 4px 24px",
+          padding: "4px 8px 4px 36px",
           cursor: "pointer",
           background: isSelected && !selectedTaskId ? "rgba(245,158,11,0.05)" : "transparent",
         }}
@@ -123,6 +124,60 @@ function JobItem({ job, isSelected, selectedTaskId, onSelectJob, onSelectTask })
           task={task}
           isSelected={task.id === selectedTaskId}
           onSelect={onSelectTask}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PhaseItem({ phase, selectedJobId, selectedTaskId, onSelectJob, onSelectTask }) {
+  const status = getRecordStatus(phase);
+  const color = STATUS_COLORS[status] || T.muted;
+
+  return (
+    <div style={{ marginBottom: 2 }}>
+      {/* Phase header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "4px 8px 4px 24px",
+          background: "rgba(255,255,255,0.015)",
+        }}
+      >
+        <div
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: color,
+            flexShrink: 0,
+          }}
+        />
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: T.text,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {phase.name}
+        </span>
+      </div>
+
+      {/* Jobs */}
+      {phase.jobs?.map((job) => (
+        <JobItem
+          key={job.id}
+          job={job}
+          isSelected={job.id === selectedJobId}
+          selectedTaskId={selectedTaskId}
+          onSelectJob={onSelectJob}
+          onSelectTask={onSelectTask}
         />
       ))}
     </div>
@@ -171,52 +226,61 @@ export function TimelineSidebar({
         Timeline
       </div>
 
-      {tree.phases.map((phase) => {
-        const status = getRecordStatus(phase);
-        const color = STATUS_COLORS[status] || T.muted;
+      {tree.stages.map((stage) => {
+        const stageStatus = getRecordStatus(stage);
+        const stageColor = STATUS_COLORS[stageStatus] || T.muted;
+        const isSynthetic = stage._synthetic;
+
+        // For synthetic or single __default stages, skip the stage header
+        // and render phases directly
+        const showStageHeader =
+          !isSynthetic &&
+          (tree.stages.length > 1 || stage.name !== "__default");
 
         return (
-          <div key={phase.id} style={{ marginBottom: 2 }}>
-            {/* Phase header */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 12px",
-                background: "rgba(255,255,255,0.02)",
-                borderBottom: `1px solid ${T.border}`,
-              }}
-            >
+          <div key={stage.id}>
+            {showStageHeader && (
               <div
                 style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: color,
-                  flexShrink: 0,
-                }}
-              />
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: T.heading,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "6px 12px",
+                  background: "rgba(255,255,255,0.02)",
+                  borderBottom: `1px solid ${T.border}`,
                 }}
               >
-                {phase.name}
-              </span>
-            </div>
+                <div
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: 2,
+                    background: stageColor,
+                    flexShrink: 0,
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: T.heading,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.03em",
+                  }}
+                >
+                  {stage.name}
+                </span>
+              </div>
+            )}
 
-            {/* Jobs */}
-            {phase.jobs?.map((job) => (
-              <JobItem
-                key={job.id}
-                job={job}
-                isSelected={job.id === selectedJobId}
+            {stage.phases?.map((phase) => (
+              <PhaseItem
+                key={phase.id}
+                phase={phase}
+                selectedJobId={selectedJobId}
                 selectedTaskId={selectedTaskId}
                 onSelectJob={onSelectJob}
                 onSelectTask={onSelectTask}

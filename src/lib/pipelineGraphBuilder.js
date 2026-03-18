@@ -4,6 +4,12 @@ import { getRecordStatus, getAggregateStatus } from "./timelineUtils";
 /**
  * Build graph nodes and edges from pipeline API responses.
  *
+ * ADO timeline hierarchy: Stage > Phase > Job > Task
+ * The graph shows: Stage (container) → Phase (container) → Job (clickable) + Resources
+ *
+ * Single-stage pipelines (name === "__default") auto-collapse the stage node
+ * to avoid visual clutter.
+ *
  * @param {object}   timeline   Timeline response with .records[]
  * @param {object}   run        Pipeline run response with .resources
  * @param {object[]} artifacts  Artifacts array
@@ -14,8 +20,34 @@ export function buildGraphData(timeline, run, artifacts) {
   const edges = [];
   const records = timeline?.records || [];
 
-  const phases = records.filter((r) => r.recordType === "Phase");
-  const jobs = records.filter((r) => r.recordType === "Job");
+  const stages = records.filter((r) => r.type === "Stage");
+  const phases = records.filter((r) => r.type === "Phase");
+  const jobs = records.filter((r) => r.type === "Job");
+
+  // Determine if we should show stage nodes
+  // Skip if there's only one stage named "__default" (single-stage pipeline)
+  const showStages =
+    stages.length > 1 ||
+    (stages.length === 1 && stages[0].name !== "__default");
+
+  // Stage nodes
+  if (showStages) {
+    for (const stage of stages) {
+      const stagePhases = phases.filter((p) => p.parentId === stage.id);
+      const stageJobs = stagePhases.flatMap((ph) =>
+        jobs.filter((j) => j.parentId === ph.id)
+      );
+      nodes.push({
+        id: stage.id,
+        type: "stage",
+        name: stage.name,
+        status: getAggregateStatus(stageJobs.length ? stageJobs : stagePhases),
+        data: { phaseCount: stagePhases.length },
+        width: 220,
+        height: 60,
+      });
+    }
+  }
 
   // Phase nodes
   for (const phase of phases) {
@@ -29,9 +61,18 @@ export function buildGraphData(timeline, run, artifacts) {
       width: 200,
       height: 60,
     });
+
+    // Stage contains Phase (only if we're rendering stages)
+    if (showStages && phase.parentId && stages.some((s) => s.id === phase.parentId)) {
+      edges.push({
+        source: phase.parentId,
+        target: phase.id,
+        type: "contains",
+      });
+    }
   }
 
-  // Job nodes + contains edges
+  // Job nodes + edges
   for (const job of jobs) {
     nodes.push({
       id: job.id,
@@ -61,11 +102,14 @@ export function buildGraphData(timeline, run, artifacts) {
     // Job dependency edges
     if (job.dependencies?.length) {
       for (const dep of job.dependencies) {
-        edges.push({
-          source: dep.recordId,
-          target: job.id,
-          type: "dependsOn",
-        });
+        // Ensure the dependency target exists in records
+        if (records.some((r) => r.id === dep.recordId)) {
+          edges.push({
+            source: dep.recordId,
+            target: job.id,
+            type: "dependsOn",
+          });
+        }
       }
     }
   }
@@ -88,7 +132,6 @@ export function buildGraphData(timeline, run, artifacts) {
       });
 
       // Try to link artifact to the job that produced it
-      // Heuristic: match by job name in artifact source
       const producerJob = jobs.find(
         (j) =>
           artifact.source === j.name ||
@@ -129,7 +172,7 @@ export function buildGraphData(timeline, run, artifacts) {
           height: 50,
         });
 
-        // If self repo, connect to all jobs (primary source)
+        // If self repo, connect to first job
         if (repo.alias === "self" || repo.self) {
           const firstJob = jobs[0];
           if (firstJob) {
@@ -193,7 +236,6 @@ export function layoutGraph(nodes, edges) {
   }
 
   for (const edge of edges) {
-    // Only layout edges whose source and target both exist
     if (g.hasNode(edge.source) && g.hasNode(edge.target)) {
       g.setEdge(edge.source, edge.target);
     }

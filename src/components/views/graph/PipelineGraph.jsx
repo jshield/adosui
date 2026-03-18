@@ -116,6 +116,8 @@ export function PipelineGraph({
           position: "absolute",
           top: 0,
           left: 0,
+          width: width,
+          height: height,
         }}
       >
         {/* SVG layer for edges */}
@@ -195,28 +197,34 @@ export function PipelineGraph({
         </svg>
 
         {/* HTML layer for nodes via absolute positioning */}
-        {nodes.map((node) => (
-          <div
-            key={node.id}
-            style={{
-              position: "absolute",
-              left: node.x,
-              top: node.y,
-            }}
-          >
-            {node.type === "job" ? (
-              <JobNode
-                node={node}
-                isSelected={node.id === selectedJobId}
-                onClick={onNodeClick}
-              />
-            ) : node.type === "phase" ? (
-              <PhaseNode node={node} />
-            ) : (
-              <ResourceNode node={node} />
-            )}
-          </div>
-        ))}
+        {nodes.map((node) => {
+          const x = isFinite(node.x) ? node.x : 0;
+          const y = isFinite(node.y) ? node.y : 0;
+          return (
+            <div
+              key={node.id}
+              style={{
+                position: "absolute",
+                left: x,
+                top: y,
+              }}
+            >
+              {node.type === "job" ? (
+                <JobNode
+                  node={node}
+                  isSelected={node.id === selectedJobId}
+                  onClick={onNodeClick}
+                />
+              ) : node.type === "stage" ? (
+                <PhaseNode node={node} isStage />
+              ) : node.type === "phase" ? (
+                <PhaseNode node={node} />
+              ) : (
+                <ResourceNode node={node} />
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Zoom indicator */}
