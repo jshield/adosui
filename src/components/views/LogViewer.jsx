@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useCallback, useState } from "react";
-import { FixedSizeList } from "react-window";
-import AutoSizer from "react-virtualized-auto-sizer";
+import { List } from "react-window";
+import { AutoSizer } from "react-virtualized-auto-sizer";
 import { T } from "../../lib/theme";
 
 const LINE_HEIGHT = 20;
@@ -211,7 +211,7 @@ export function LogViewer({
 
       <AutoSizer>
         {({ height, width }) => (
-          <FixedSizeList
+          <List
             ref={listRef}
             height={height}
             width={width}
@@ -228,7 +228,7 @@ export function LogViewer({
             }}
           >
             {LogLineRow}
-          </FixedSizeList>
+          </List>
         )}
       </AutoSizer>
     </div>

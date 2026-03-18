@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
 import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, pipelineUrl, serviceConnectionUrl, wikiPageUrl, repoUrl, prUrl, getLatestRun, getRunBranch, getRunStatusVal, getLatestPerBranch } from "../../lib";
+import { PipelineLogsViewer } from "./PipelineLogsViewer";
 
 // Configure marked with custom renderer for v17 API
 const renderer = new marked.Renderer();
@@ -84,7 +85,7 @@ marked.setOptions({
   breaks: true
 });
 
-export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onAddComment, onSaveLogComments, syncStatus }) {
   const { type, data } = resource;
 
   if (type === "workitem") {
@@ -94,7 +95,7 @@ export function ResourceDetail({ client, resource, org, collection, profile, onR
     return <RepoDetail client={client} repo={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   if (type === "pipeline") {
-    return <PipelineDetail client={client} pipeline={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+    return <PipelineDetail client={client} pipeline={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} onSaveLogComments={onSaveLogComments} syncStatus={syncStatus} />;
   }
   if (type === "pr") {
     return <PRDetail client={client} pr={data} collection={collection} org={org} profile={profile} onResourceToggle={onResourceToggle} syncStatus={syncStatus} />;
@@ -263,7 +264,7 @@ function RepoDetail({ client, repo, org, collection, profile, onResourceToggle, 
   );
 }
 
-function PipelineDetail({ client, pipeline, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+function PipelineDetail({ client, pipeline, org, collection, profile, onResourceToggle, onAddComment, onSaveLogComments, syncStatus }) {
   const rs = pipelineStatus(pipeline.latestRun?.result || pipeline.latestRun?.state);
 
   const handleToggle = () => {
@@ -271,6 +272,7 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
     onResourceToggle("pipeline", pipeline.id, collection.id);
   };
 
+  const [showLogs, setShowLogs] = useState(false);
   const [runs, setRuns] = useState([]);
   const [runsLoading, setRunsLoading] = useState(false);
 
@@ -333,71 +335,98 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setShowLogs(!showLogs)}
+              style={{
+                background: showLogs ? "rgba(245,158,11,0.1)" : "none",
+                border: `1px solid ${showLogs ? "rgba(245,158,11,0.3)" : T.dim}`,
+                color: showLogs ? T.amber : T.muted,
+                fontSize: 10,
+                padding: "4px 10px",
+                borderRadius: 4,
+                cursor: "pointer",
+                fontWeight: 500,
+              }}
+            >
+              {showLogs ? "View Details" : "View Logs"}
+            </button>
             {org && pipeline._projectName && <AdoLink href={pipelineUrl(org, pipeline._projectName, pipeline.id)} />}
             {collection && <ToggleBtn added={isInCollection(collection, "pipeline", pipeline.id)} color={collection.color} onClick={handleToggle} />}
           </div>
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-        <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
-          {[
-            ["Folder", pipeline.folder || "/"],
-            ["Definition ID", String(pipeline.id)],
-          ].map(([label, val]) => (
-            <div key={label} style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-              <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>{label}</span>
-              <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{val}</span>
+      {showLogs ? (
+        <PipelineLogsViewer
+          client={client}
+          pipeline={pipeline}
+          runs={runs}
+          collection={collection}
+          profile={profile}
+          onSaveComments={onSaveLogComments}
+          syncStatus={syncStatus}
+        />
+      ) : (
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+          <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+            {[
+              ["Folder", pipeline.folder || "/"],
+              ["Definition ID", String(pipeline.id)],
+            ].map(([label, val]) => (
+              <div key={label} style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>{label}</span>
+                <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>{val}</span>
+              </div>
+            ))}
+            <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+              <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Last Run</span>
+              <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>
+                <Pill label={pipelineStatus(pipeline.latestRun?.result || pipeline.latestRun?.state).label} color={pipelineStatus(pipeline.latestRun?.result || pipeline.latestRun?.state).color} />
+                <span style={{ marginLeft: 8 }}>{timeAgo(pipeline.latestRun?.startTime)}</span>
+              </span>
             </div>
-          ))}
-          <div style={{ display: "flex", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-            <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11 }}>Last Run</span>
-            <span style={{ flex: 1, color: T.text, fontFamily: "'JetBrains Mono'" }}>
-              <Pill label={pipelineStatus(pipeline.latestRun?.result || pipeline.latestRun?.state).label} color={pipelineStatus(pipeline.latestRun?.result || pipeline.latestRun?.state).color} />
-              <span style={{ marginLeft: 8 }}>{timeAgo(pipeline.latestRun?.startTime)}</span>
-            </span>
           </div>
-        </div>
 
-        <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
-          <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Runs by Branch
-          </div>
-          {runsLoading ? (
-            <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>
-              <Spinner /> Loading...
+          <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Runs by Branch
             </div>
-            ) : Object.keys(runsByBranch).length > 0 ? (
-            Object.entries(runsByBranch).map(([branch, branchRuns]) => {
-              const latest = getLatestRun(branchRuns);
-              const st = pipelineStatus(getRunStatusVal(latest));
-              const branchLabel = getRunBranch(latest) || branch;
-              return (
-                <div key={branch} style={{ display: "flex", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
-                  <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branchLabel}</span>
-                  <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, fontFamily: "'JetBrains Mono'" }}>
-                    <Pill label={st.label} color={st.color} />
-                    <span style={{ color: T.dim, fontSize: 11 }}>{timeAgo(latest?.startTime || latest?.queueTime)}</span>
-                  </span>
-                </div>
-              );
-            })
-          ) : (
-            <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No runs found</div>
+            {runsLoading ? (
+              <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>
+                <Spinner /> Loading...
+              </div>
+              ) : Object.keys(runsByBranch).length > 0 ? (
+              Object.entries(runsByBranch).map(([branch, branchRuns]) => {
+                const latest = getLatestRun(branchRuns);
+                const st = pipelineStatus(getRunStatusVal(latest));
+                const branchLabel = getRunBranch(latest) || branch;
+                return (
+                  <div key={branch} style={{ display: "flex", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${T.border}`, fontSize: 12 }}>
+                    <span style={{ width: 120, flexShrink: 0, color: T.dim, fontFamily: "'JetBrains Mono'", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{branchLabel}</span>
+                    <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, fontFamily: "'JetBrains Mono'" }}>
+                      <Pill label={st.label} color={st.color} />
+                      <span style={{ color: T.dim, fontSize: 11 }}>{timeAgo(latest?.startTime || latest?.queueTime)}</span>
+                    </span>
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No runs found</div>
+            )}
+          </div>
+
+          {collection && onAddComment && (
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+              <CommentThread
+                comments={(collection.pipelines || []).find(p => String(p.id) === String(pipeline.id))?.comments || []}
+                onAdd={(text) => onAddComment(collection.id, "pipeline", pipeline.id, text)}
+                authorName={profile?.displayName || ""}
+                disabled={syncStatus === "saving"}
+              />
+            </div>
           )}
         </div>
-
-        {collection && onAddComment && (
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
-            <CommentThread
-              comments={(collection.pipelines || []).find(p => String(p.id) === String(pipeline.id))?.comments || []}
-              onAdd={(text) => onAddComment(collection.id, "pipeline", pipeline.id, text)}
-              authorName={profile?.displayName || ""}
-              disabled={syncStatus === "saving"}
-            />
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

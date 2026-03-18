@@ -73,12 +73,12 @@ export function migrateCollection(raw) {
   // Migrate pipelineIds → pipelines
   if (!Array.isArray(col.pipelines)) {
     const ids = Array.isArray(col.pipelineIds) ? col.pipelineIds : [];
-    col.pipelines = ids.map(id => ({ id: String(id), comments: [] }));
+    col.pipelines = ids.map(id => ({ id: String(id), comments: [], runs: [] }));
   } else {
     col.pipelines = col.pipelines.map(p =>
       typeof p === "string"
-        ? { id: p, comments: [] }
-        : { comments: [], ...p }
+        ? { id: p, comments: [], runs: [] }
+        : { comments: [], runs: [], ...p }
     );
   }
 
@@ -147,6 +147,21 @@ function serialise(collection) {
       folder:            p.folder || "",
       configurationType: p.configurationType || "",
       comments:          p.comments || [],
+      runs:              (p.runs || []).slice(0, 5).map(r => ({
+        id:          r.id,
+        buildNumber: r.buildNumber || "",
+        branch:      r.branch || "",
+        startTime:   r.startTime || "",
+        comments:    (r.comments || []).map(c => ({
+          id:        c.id || "",
+          lineRefs:  c.lineRefs || [],
+          author:    c.author || "",
+          authorId:  c.authorId || "",
+          text:      c.text || "",
+          resolved:  !!c.resolved,
+          createdAt: c.createdAt || "",
+        })),
+      })),
     })),
     prIds: (collection.prIds || []).map(String),
     serviceConnections: (collection.serviceConnections || []).map(sc => ({

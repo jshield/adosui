@@ -15,7 +15,7 @@ import { ResourceDetail } from "./ResourceDetail";
  *                       ({ pipelines: [{ id, name, project, folder, configurationType, comments }] })
  *   onTogglePin       – (pipeline) => void  called with the full ADO pipeline object
  */
-export function PipelinesView({ client, org, pinnedCollection, onTogglePin, profile, onResourceToggle, onAddComment, syncStatus }) {
+export function PipelinesView({ client, org, pinnedCollection, onTogglePin, profile, onResourceToggle, onAddComment, onSaveLogComments, syncStatus }) {
   // Derive the pinned list from the collection's pipelines array
   const pinnedPipelines = pinnedCollection?.pipelines || [];
 
@@ -287,6 +287,7 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
               profile={profile}
               onResourceToggle={onResourceToggle}
               onAddComment={onAddComment}
+              onSaveLogComments={onSaveLogComments}
               syncStatus={syncStatus}
             />
         }

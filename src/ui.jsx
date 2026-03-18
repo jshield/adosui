@@ -321,6 +321,31 @@ export default function App() {
     });
   }, [profile, updateCollection]);
 
+  const handleSaveLogComments = useCallback((colId, pipelineId, runId, comments) => {
+    if (!colId) return;
+    updateCollection(colId, c => ({
+      ...c,
+      pipelines: (c.pipelines || []).map(p =>
+        String(p.id) === String(pipelineId)
+          ? {
+              ...p,
+              runs: (() => {
+                const runs = [...(p.runs || [])];
+                const idx = runs.findIndex(r => r.id === runId);
+                if (idx >= 0) {
+                  runs[idx] = { ...runs[idx], comments };
+                } else {
+                  runs.push({ id: runId, comments });
+                }
+                // Cap at 5 most recent runs
+                return runs.slice(-5);
+              })(),
+            }
+          : p
+      ),
+    }));
+  }, [updateCollection]);
+
   const handleAddCollectionNote = useCallback((colId, text) => {
     if (!profile) return;
     const comment = {
@@ -558,6 +583,7 @@ export default function App() {
               profile={profile}
               onResourceToggle={handleResourceToggle}
               onAddComment={handleAddComment}
+              onSaveLogComments={handleSaveLogComments}
               syncStatus={syncStatus}
             />
           </div>
@@ -607,6 +633,7 @@ export default function App() {
                   profile={profile}
                   onResourceToggle={handleResourceToggle}
                   onAddComment={handleAddComment}
+                  onSaveLogComments={handleSaveLogComments}
                   syncStatus={syncStatus}
                 />
               ) : selectedSearchResult ? (

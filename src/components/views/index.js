@@ -1,4 +1,5 @@
 export { PipelinesView }                      from "./PipelinesView";
+export { PipelineLogsViewer }                 from "./PipelineLogsViewer";
 export { FilterPanel, ALL_TYPES, ALL_STATES } from "./FilterPanel";
 export { ConnectScreen }                      from "./ConnectScreen";
 export { SetupScreen }                        from "./SetupScreen";
