@@ -1,26 +1,13 @@
 import React, { useRef, useEffect, useCallback, useState } from "react";
-import { List } from "react-window";
-import { AutoSizer } from "react-virtualized-auto-sizer";
 import { T } from "../../lib/theme";
 
-const LINE_HEIGHT = 20;
-
-function LogLineRow({ index, style, lines, selectionStart, selectionEnd, isSelecting, commentedLines, onMouseDown, onMouseEnter }) {
-  const line = lines[index];
-  if (!line) return null;
-
-  const selStart = Math.min(selectionStart ?? -1, selectionEnd ?? -1);
-  const selEnd = Math.max(selectionStart ?? -1, selectionEnd ?? -1);
-  const isSelected =
-    selStart >= 0 && selEnd >= 0 && index >= selStart && index <= selEnd;
-  const hasComment = commentedLines?.has(index);
-
+function LogLine({ line, index, isSelected, hasComment, isSelecting, onMouseDown, onMouseEnter }) {
   return (
     <div
       style={{
-        ...style,
         display: "flex",
         alignItems: "center",
+        height: 20,
         background: isSelected ? "rgba(245,158,11,0.12)" : "transparent",
         userSelect: isSelecting ? "none" : "auto",
       }}
@@ -91,7 +78,7 @@ export function LogViewer({
   onLineSelect,
   noLogMessage,
 }) {
-  const listRef = useRef(null);
+  const containerRef = useRef(null);
   const prevLenRef = useRef(0);
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionStart, setSelectionStart] = useState(null);
@@ -102,15 +89,15 @@ export function LogViewer({
     if (
       connectionStatus === "connected" &&
       lines.length > prevLenRef.current &&
-      listRef.current
+      containerRef.current
     ) {
-      listRef.current.scrollToRow({ index: lines.length - 1, align: "end" });
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
     prevLenRef.current = lines.length;
   }, [lines.length, connectionStatus]);
 
   const handleMouseDown = useCallback((index, e) => {
-    if (e.button !== 0) return; // left click only
+    if (e.button !== 0) return;
     setSelectionStart(index);
     setSelectionEnd(index);
     setIsSelecting(true);
@@ -134,9 +121,10 @@ export function LogViewer({
     setIsSelecting(false);
   }, [isSelecting, selectionStart, selectionEnd, onLineSelect]);
 
-  // Use selected range from parent if provided (e.g., when clicking a comment)
   const effectiveStart = selectedRange ? selectedRange.start : selectionStart;
   const effectiveEnd = selectedRange ? selectedRange.end : selectionEnd;
+  const selStart = Math.min(effectiveStart ?? -1, effectiveEnd ?? -1);
+  const selEnd = Math.max(effectiveStart ?? -1, effectiveEnd ?? -1);
 
   if (!lines?.length && !loading) {
     return (
@@ -148,11 +136,13 @@ export function LogViewer({
 
   return (
     <div
+      ref={containerRef}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       style={{
         flex: 1,
         minHeight: 200,
+        overflowY: "auto",
         background: T.bg,
         borderRadius: 4,
         border: `1px solid ${T.border}`,
@@ -163,7 +153,7 @@ export function LogViewer({
       {(loading || connectionStatus === "connected" || connectionStatus === "connecting") && (
         <div
           style={{
-            position: "absolute",
+            position: "sticky",
             top: 0,
             left: 0,
             right: 0,
@@ -179,9 +169,9 @@ export function LogViewer({
       {connectionStatus && connectionStatus !== "disconnected" && (
         <div
           style={{
-            position: "absolute",
-            top: 6,
-            right: 8,
+            position: "sticky",
+            top: 4,
+            float: "right",
             fontSize: 9,
             color:
               connectionStatus === "connected"
@@ -193,32 +183,26 @@ export function LogViewer({
             padding: "2px 6px",
             borderRadius: 3,
             zIndex: 2,
+            marginRight: 8,
           }}
         >
           {connectionStatus}
         </div>
       )}
 
-      <AutoSizer>
-        {({ height, width }) => (
-          <List
-            listRef={listRef}
-            style={{ height, width }}
-            rowCount={lines.length}
-            rowHeight={LINE_HEIGHT}
-            rowProps={{
-              lines,
-              selectionStart: effectiveStart,
-              selectionEnd: effectiveEnd,
-              isSelecting,
-              commentedLines,
-              onMouseDown: handleMouseDown,
-              onMouseEnter: handleMouseEnter,
-            }}
-            rowComponent={LogLineRow}
-          />
-        )}
-      </AutoSizer>
+      {/* Log lines */}
+      {lines.map((line, index) => (
+        <LogLine
+          key={line.lineNumber ?? index}
+          line={line}
+          index={index}
+          isSelected={selStart >= 0 && selEnd >= 0 && index >= selStart && index <= selEnd}
+          hasComment={commentedLines?.has(index) || false}
+          isSelecting={isSelecting}
+          onMouseDown={handleMouseDown}
+          onMouseEnter={handleMouseEnter}
+        />
+      ))}
     </div>
   );
 }
