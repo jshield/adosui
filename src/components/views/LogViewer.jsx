@@ -5,17 +5,7 @@ import { T } from "../../lib/theme";
 
 const LINE_HEIGHT = 20;
 
-function LogLineRow({ index, style, data }) {
-  const {
-    lines,
-    selectionStart,
-    selectionEnd,
-    isSelecting,
-    commentedLines,
-    onMouseDown,
-    onMouseEnter,
-  } = data;
-
+function LogLineRow({ index, style, lines, selectionStart, selectionEnd, isSelecting, commentedLines, onMouseDown, onMouseEnter }) {
   const line = lines[index];
   if (!line) return null;
 
@@ -114,7 +104,7 @@ export function LogViewer({
       lines.length > prevLenRef.current &&
       listRef.current
     ) {
-      listRef.current.scrollToItem(lines.length - 1, "end");
+      listRef.current.scrollToRow({ index: lines.length - 1, align: "end" });
     }
     prevLenRef.current = lines.length;
   }, [lines.length, connectionStatus]);
@@ -212,12 +202,11 @@ export function LogViewer({
       <AutoSizer>
         {({ height, width }) => (
           <List
-            ref={listRef}
-            height={height}
-            width={width}
-            itemCount={lines.length}
-            itemSize={LINE_HEIGHT}
-            itemData={{
+            listRef={listRef}
+            style={{ height, width }}
+            rowCount={lines.length}
+            rowHeight={LINE_HEIGHT}
+            rowProps={{
               lines,
               selectionStart: effectiveStart,
               selectionEnd: effectiveEnd,
@@ -226,9 +215,8 @@ export function LogViewer({
               onMouseDown: handleMouseDown,
               onMouseEnter: handleMouseEnter,
             }}
-          >
-            {LogLineRow}
-          </List>
+            rowComponent={LogLineRow}
+          />
         )}
       </AutoSizer>
     </div>
