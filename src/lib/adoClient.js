@@ -646,6 +646,37 @@ export class ADOClient {
     );
   }
 
+  /**
+   * Fetch the expanded YAML for a pipeline's most recent completed run.
+   * Falls back to fetching the pipeline configuration repository file.
+   */
+  async getPipelineYaml(project, pipelineId) {
+    // 1. Get recent runs
+    const runs = await this.getPipelineRuns(project, pipelineId);
+    const completed = (runs || []).find(r =>
+      r.state === "completed" || r.result === "succeeded" ||
+      r.result === "failed"  || r.result === "cancelled"
+    ) || runs?.[0];
+    if (!completed) throw new Error("No runs found for pipeline");
+
+    // 2. Fetch the expanded YAML for that run
+    return this._fetchText(
+      `${this.base}/${encodeURIComponent(project)}/_apis/pipelines/${encodeURIComponent(pipelineId)}/runs/${encodeURIComponent(completed.id)}?$expand=finalYaml&api-version=7.1`
+    );
+  }
+
+  /**
+   * Concatenate all log segments for a build into a single string.
+   */
+  async getFullBuildLog(project, buildId) {
+    const entries = await this.getBuildLogs(project, buildId);
+    if (!entries.length) return "";
+    const parts = await Promise.all(
+      entries.map(e => this.getBuildLog(project, buildId, e.id).catch(() => ""))
+    );
+    return parts.join("\n");
+  }
+
   async getPipelineRun(project, pipelineId, runId) {
     return this._fetch(
       `${this.base}/${encodeURIComponent(project)}/_apis/pipelines/${encodeURIComponent(pipelineId)}/runs/${encodeURIComponent(runId)}?api-version=7.1`

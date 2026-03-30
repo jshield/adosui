@@ -4,6 +4,7 @@ import { T } from "../../lib/theme";
 import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
 import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, pipelineUrl, serviceConnectionUrl, wikiPageUrl, repoUrl, prUrl, getLatestRun, getRunBranch, getRunStatusVal, getLatestPerBranch } from "../../lib";
 import { PipelineLogsViewer } from "./PipelineLogsViewer";
+import { parsePipeline, parsePipelineLogs, mergeTargets, TARGET_TYPE_META } from "../../lib/pipelineParser";
 
 // Configure marked with custom renderer for v17 API
 const renderer = new marked.Renderer();
@@ -264,6 +265,118 @@ function RepoDetail({ client, repo, org, collection, profile, onResourceToggle, 
   );
 }
 
+/* ─── Deployment Targets sub-component ────────────────────────── */
+
+const SOURCE_COLORS = { yaml: T.cyan, log: T.green, both: T.amber };
+
+function DeploymentTargetsSection({ client, pipeline, runs }) {
+  const [targets, setTargets]   = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState(null);
+
+  useEffect(() => {
+    if (!pipeline?._projectName || !pipeline?.id || !runs?.length) return;
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const latest = runs.find(r =>
+          r.state === "completed" || r.result === "succeeded" ||
+          r.result === "failed"  || r.result === "cancelled"
+        ) || runs[0];
+
+        let yamlTargets = [];
+        let logTargets  = [];
+
+        // YAML analysis (only for yaml-type pipelines)
+        if (pipeline.configuration?.type === "yaml") {
+          try {
+            const raw = await client.getPipelineYaml(pipeline._projectName, pipeline.id);
+            // The $expand=finalYaml endpoint returns JSON with a finalYaml property
+            let yamlText = raw;
+            try { const parsed = JSON.parse(raw); yamlText = parsed.finalYaml || raw; } catch {}
+            yamlTargets = parsePipeline(yamlText);
+          } catch { /* YAML may not be available */ }
+        }
+
+        // Log analysis
+        try {
+          const buildId = latest.id;
+          const logText = await client.getFullBuildLog(pipeline._projectName, buildId);
+          logTargets = parsePipelineLogs(logText);
+        } catch { /* logs may not be available */ }
+
+        if (!cancelled) setTargets(mergeTargets(yamlTargets, logTargets));
+      } catch (e) {
+        if (!cancelled) setError("Failed to detect deployment targets");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [pipeline?.id, runs?.length]);
+
+  if (loading) {
+    return (
+      <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
+        <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Deployment Targets</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>
+          <Spinner /> Analysing pipeline...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
+        <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Deployment Targets</div>
+        <div style={{ color: T.red, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>{error}</div>
+      </div>
+    );
+  }
+
+  if (!targets.length) return null; // nothing to show
+
+  return (
+    <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
+      <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        Deployment Targets
+        <span style={{ marginLeft: 8, color: T.dim, fontSize: 10 }}>{targets.length}</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {targets.map((t, i) => {
+          const meta   = TARGET_TYPE_META[t.type] || { label: t.type, icon: "DEP" };
+          const srcClr = SOURCE_COLORS[t.source] || T.muted;
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "rgba(255,255,255,0.02)", border: `1px solid ${T.border}`, borderLeft: `3px solid ${srcClr}`, borderRadius: 5 }}>
+              <span style={{ fontSize: 9, fontFamily: "'JetBrains Mono'", color: srcClr, width: 28, textAlign: "center", flexShrink: 0, fontWeight: 700 }}>{meta.icon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono'", color: T.text, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {t.name || "unnamed"}
+                  </span>
+                  <Pill label={meta.label} color={srcClr} />
+                </div>
+                <div style={{ display: "flex", gap: 12, marginTop: 3, fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
+                  {t.resourceGroup && <span>rg: {t.resourceGroup}</span>}
+                  {t.slot && <span>slot: {t.slot}</span>}
+                  {t.namespace && <span>ns: {t.namespace}</span>}
+                  {t.subscription && <span>sub: {t.subscription}</span>}
+                </div>
+              </div>
+              <span style={{ fontSize: 9, fontFamily: "'JetBrains Mono'", color: srcClr, textTransform: "uppercase", flexShrink: 0 }}>{t.source}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PipelineDetail({ client, pipeline, org, collection, profile, onResourceToggle, onAddComment, onSaveLogComments, syncStatus }) {
   const rs = pipelineStatus(pipeline.latestRun?.result || pipeline.latestRun?.state);
 
@@ -414,6 +527,8 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
               <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No runs found</div>
             )}
           </div>
+
+          <DeploymentTargetsSection client={client} pipeline={pipeline} runs={runs} />
 
           {collection && onAddComment && (
             <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
