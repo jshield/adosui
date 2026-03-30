@@ -13,7 +13,10 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
-    "tests": "vitest run"
+    "tests": "vitest run",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:headed": "playwright test --headed"
   },
   "dependencies": {
     "@microsoft/signalr": "^10.0.0",
@@ -29,12 +32,14 @@
     "react-window": "^2.2.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/react": "^14.2.1",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^1.6.1",
     "jsdom": "^24.0.0",
     "msw": "^2.2.0",
+    "playwright": "^1.58.2",
     "vite": "^5.1.0",
     "vitest": "^1.3.0"
   },
