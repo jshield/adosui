@@ -24,9 +24,6 @@ dist/
 *.log
 npm-debug.log*
 
-# Lock files (keep package-lock.json, ignore pnpm)
-pnpm-lock.yaml
-
 # Test artifacts
 coverage/
 *.tsbuildinfo
