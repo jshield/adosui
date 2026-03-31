@@ -650,6 +650,7 @@ export default function App() {
                   collection={collection}
                   profile={profile}
                   onResourceToggle={handleResourceToggle}
+                  onWorkItemToggle={handleWorkItemToggle}
                   onAddComment={handleAddComment}
                   onSaveLogComments={handleSaveLogComments}
                   syncStatus={syncStatus}

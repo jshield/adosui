@@ -1,8 +1,8 @@
 import { marked } from "marked";
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
-import { Pill, Dot, Spinner, Field, AdoLink, ToggleBtn, CommentThread } from "../ui";
-import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, isInCollection, prStatus, branchName, workItemUrl, pipelineUrl, serviceConnectionUrl, wikiPageUrl, repoUrl, prUrl, getLatestRun, getRunBranch, getRunStatusVal, getLatestPerBranch } from "../../lib";
+import { Pill, Dot, Spinner, Field, AdoLink, ResourceToggle, CommentThread } from "../ui";
+import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, timeAgo, pipelineStatus, prStatus, branchName, workItemUrl, pipelineUrl, serviceConnectionUrl, wikiPageUrl, repoUrl, prUrl, getLatestRun, getRunBranch, getRunStatusVal, getLatestPerBranch } from "../../lib";
 import { PipelineLogsViewer } from "./PipelineLogsViewer";
 import { parsePipeline, parsePipelineLogs, mergeTargets, TARGET_TYPE_META } from "../../lib/pipelineParser";
 
@@ -86,31 +86,31 @@ marked.setOptions({
   breaks: true
 });
 
-export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onAddComment, onSaveLogComments, syncStatus }) {
+export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, onSaveLogComments, syncStatus }) {
   const { type, data } = resource;
 
   if (type === "workitem") {
-    return <WorkItemDetail client={client} workItem={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+    return <WorkItemDetail client={client} workItem={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   if (type === "repo") {
-    return <RepoDetail client={client} repo={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+    return <RepoDetail client={client} repo={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   if (type === "pipeline") {
-    return <PipelineDetail client={client} pipeline={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} onSaveLogComments={onSaveLogComments} syncStatus={syncStatus} />;
+    return <PipelineDetail client={client} pipeline={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} onSaveLogComments={onSaveLogComments} syncStatus={syncStatus} />;
   }
   if (type === "pr") {
-    return <PRDetail client={client} pr={data} collection={collection} org={org} profile={profile} onResourceToggle={onResourceToggle} syncStatus={syncStatus} />;
+    return <PRDetail client={client} pr={data} collection={collection} org={org} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} syncStatus={syncStatus} />;
   }
   if (type === "serviceconnection") {
-    return <ServiceConnectionDetail client={client} serviceConnection={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+    return <ServiceConnectionDetail client={client} serviceConnection={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   if (type === "wiki") {
-    return <WikiPageDetail client={client} wikiPage={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+    return <WikiPageDetail client={client} wikiPage={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
   return null;
 }
 
-function WorkItemDetail({ client, workItem, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+function WorkItemDetail({ client, workItem, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, syncStatus }) {
   const [wiComments, setWiComments] = useState([]);
   const [wiCommentsLoading, setWiCommentsLoading] = useState(false);
 
@@ -130,11 +130,6 @@ function WorkItemDetail({ client, workItem, org, collection, profile, onResource
         .finally(() => setWiCommentsLoading(false));
     }
   }, [workItem.id, projectId]);
-
-  const handleToggle = (resourceType, id) => {
-    if (!collection || !onResourceToggle) return;
-    onResourceToggle(resourceType, id, collection.id);
-  };
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -213,11 +208,7 @@ function WorkItemDetail({ client, workItem, org, collection, profile, onResource
   );
 }
 
-function RepoDetail({ client, repo, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
-  const handleToggle = () => {
-    if (!collection || !onResourceToggle) return;
-    onResourceToggle("repo", repo.id, collection.id);
-  };
+function RepoDetail({ client, repo, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, syncStatus }) {
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -231,7 +222,7 @@ function RepoDetail({ client, repo, org, collection, profile, onResourceToggle, 
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {org && repo._projectName && <AdoLink href={repoUrl(org, repo._projectName, repo.name)} />}
-            {collection && <ToggleBtn added={isInCollection(collection, "repo", repo.id)} color={collection.color} onClick={handleToggle} />}
+            {collection && <ResourceToggle type="repo" item={repo} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} size="full" />}
           </div>
         </div>
       </div>
@@ -377,13 +368,8 @@ function DeploymentTargetsSection({ client, pipeline, runs }) {
   );
 }
 
-function PipelineDetail({ client, pipeline, org, collection, profile, onResourceToggle, onAddComment, onSaveLogComments, syncStatus }) {
+function PipelineDetail({ client, pipeline, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, onSaveLogComments, syncStatus }) {
   const rs = pipelineStatus(pipeline.latestRun?.result || pipeline.latestRun?.state);
-
-  const handleToggle = () => {
-    if (!collection || !onResourceToggle) return;
-    onResourceToggle("pipeline", pipeline.id, collection.id);
-  };
 
   const [showLogs, setShowLogs] = useState(false);
   const [runs, setRuns] = useState([]);
@@ -464,7 +450,7 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
               {showLogs ? "View Details" : "View Logs"}
             </button>
             {org && pipeline._projectName && <AdoLink href={pipelineUrl(org, pipeline._projectName, pipeline.id)} />}
-            {collection && <ToggleBtn added={isInCollection(collection, "pipeline", pipeline.id)} color={collection.color} onClick={handleToggle} />}
+            {collection && <ResourceToggle type="pipeline" item={pipeline} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} size="full" />}
           </div>
         </div>
       </div>
@@ -546,13 +532,8 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
   );
 }
 
-function PRDetail({ client, pr, collection, org, profile, onResourceToggle, syncStatus }) {
+function PRDetail({ client, pr, collection, org, profile, onResourceToggle, onWorkItemToggle, syncStatus }) {
   const status = prStatus(pr.status);
-
-  const handleToggle = () => {
-    if (!collection || !onResourceToggle) return;
-    onResourceToggle("pr", pr.pullRequestId, collection.id);
-  };
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -570,7 +551,7 @@ function PRDetail({ client, pr, collection, org, profile, onResourceToggle, sync
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {org && pr._projectName && <AdoLink href={prUrl(org, pr._projectName, pr.pullRequestId)} />}
-            {collection && <ToggleBtn added={isInCollection(collection, "pr", pr.pullRequestId)} onClick={handleToggle} />}
+            {collection && <ResourceToggle type="pr" item={pr} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} size="full" />}
           </div>
         </div>
       </div>
@@ -601,15 +582,8 @@ function PRDetail({ client, pr, collection, org, profile, onResourceToggle, sync
   );
 }
 
-function ServiceConnectionDetail({ client, serviceConnection, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+function ServiceConnectionDetail({ client, serviceConnection, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, syncStatus }) {
   const project = serviceConnection._projectName || serviceConnection.project || "";
-
-  const handleToggle = () => {
-    if (!collection || !onResourceToggle) return;
-    onResourceToggle("serviceconnection", serviceConnection.id, collection.id);
-  };
-
-  const authScheme = serviceConnection.authorization?.scheme || serviceConnection.type || "Unknown";
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -628,7 +602,7 @@ function ServiceConnectionDetail({ client, serviceConnection, org, collection, p
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {project && <AdoLink href={serviceConnectionUrl(org, project, serviceConnection.id)} />}
-            {collection && <ToggleBtn added={isInCollection(collection, "serviceconnection", serviceConnection.id)} color={collection.color} onClick={handleToggle} />}
+            {collection && <ResourceToggle type="serviceconnection" item={serviceConnection} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} size="full" />}
           </div>
         </div>
       </div>
@@ -664,7 +638,7 @@ function ServiceConnectionDetail({ client, serviceConnection, org, collection, p
   );
 }
 
-function WikiPageDetail({ client, wikiPage, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+function WikiPageDetail({ client, wikiPage, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, syncStatus }) {
   const wikiId = wikiPage._wikiId || wikiPage.wikiId || "";
   const wikiName = wikiPage._wikiName || wikiPage.wikiName || "";
   const project = wikiPage._projectName || wikiPage.project || "";
@@ -673,11 +647,6 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
   const [content, setContent] = useState("");
   const [renderedContent, setRenderedContent] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
-  const handleToggle = (resourceType, id) => {
-    if (!collection || !onResourceToggle) return;
-    onResourceToggle(resourceType, id, collection.id);
-  };
   
   // Style tables
   renderer.table = (header, body) => `<table style="border-collapse: collapse; width: 100%; margin: 12px 0;"><thead>${header}</thead><tbody>${body}</tbody></table>`;
@@ -737,7 +706,7 @@ function WikiPageDetail({ client, wikiPage, org, collection, profile, onResource
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {wikiId && <AdoLink href={wikiPageUrl(org, project, wikiId, path)} />}
-          {collection && <ToggleBtn added={isInCollection(collection, "wiki", wikiPage.id)} color={collection.color} onClick={() => handleToggle("wiki", wikiPage.id)} />}
+          {collection && <ResourceToggle type="wiki" item={wikiPage} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} size="full" />}
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { T, WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, isInCollection } from "../../lib";
-import { Pill, Dot, Spinner, Input, SelectableRow, ToggleBtn } from "../ui";
+import { T, WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor } from "../../lib";
+import { Pill, Dot, Spinner, Input, SelectableRow, ResourceToggle } from "../ui";
 import { FilterPanel } from "./FilterPanel";
 
 export function WorkItemPanel({ client, collection, onSelect, selected, onFilterChange, onWorkItemToggle }) {
@@ -100,14 +100,13 @@ export function WorkItemPanel({ client, collection, onSelect, selected, onFilter
               const type  = wi.fields?.["System.WorkItemType"] || "Task";
               const state = wi.fields?.["System.State"] || "";
               const isSel = selected?.id === wi.id;
-              const isInCol = isInCollection(collection, "workitem", wi.id);
               return (
                 <SelectableRow key={wi.id} sel={isSel} selColor={collection.color} onClick={() => onSelect(wi)}>
                   <span style={{ fontSize: 9, color: WI_TYPE_COLOR[type] || T.dim, fontFamily: "'JetBrains Mono'", width: 42, flexShrink: 0 }}>{WI_TYPE_SHORT[type] || type.slice(0,5).toUpperCase()}</span>
                   <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", width: 38, flexShrink: 0 }}>#{wi.id}</span>
                   <span style={{ flex: 1, fontSize: 12, color: isSel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{wi.fields?.["System.Title"]}</span>
                   <Pill label={state} color={stateColor(state)} />
-                  <ToggleBtn added={isInCol} color={collection.color} onClick={(e) => { e.stopPropagation(); onWorkItemToggle(collection.id, wi.id); }} label={isInCol ? "✓" : "+"} />
+                  <ResourceToggle type="workitem" item={wi} collection={collection} onResourceToggle={() => {}} onWorkItemToggle={onWorkItemToggle} />
                 </SelectableRow>
               );
             })}

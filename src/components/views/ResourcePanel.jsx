@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { T, WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, isInCollection, pipelineStatus, prStatus, branchName } from "../../lib";
-import { Pill, Dot, Spinner, Input, SelectableRow, ToggleBtn } from "../ui";
+import { T, WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, pipelineStatus, prStatus, branchName } from "../../lib";
+import { Pill, Dot, Spinner, Input, SelectableRow, ResourceToggle } from "../ui";
 import { FilterPanel } from "./FilterPanel";
 
 export function ResourcePanel({ client, collection, selectedResource, onSelect, onFilterChange, onWorkItemToggle, onResourceToggle }) {
@@ -129,7 +129,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
             <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", width: 38, flexShrink: 0 }}>#{wi.id}</span>
             <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{wi.fields?.["System.Title"]}</span>
             <Pill label={state} color={stateColor(state)} />
-            <ToggleBtn added={isInCollection(collection, "workitem", wi.id)} color={collection.color} onClick={(e) => { e.stopPropagation(); onWorkItemToggle(collection.id, wi.id); }} label={isInCollection(collection, "workitem", wi.id) ? "✓" : "+"} />
+            <ResourceToggle type="workitem" item={wi} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />
           </SelectableRow>
         );
       })}
@@ -147,7 +147,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
           <SelectableRow key={r.id} sel={sel} selColor={T.cyan} onClick={() => onSelect("repo", r)}>
             <span style={{ fontSize: 12, color: T.cyan, fontFamily: "'JetBrains Mono'", width: 60, flexShrink: 0 }}>repo</span>
             <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
-            <ToggleBtn added={isInCollection(collection, "repo", r.id)} color={collection.color} onClick={(e) => { e.stopPropagation(); onResourceToggle("repo", r.id, collection.id); }} label={isInCollection(collection, "repo", r.id) ? "✓" : "+"} />
+            <ResourceToggle type="repo" item={r} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />
           </SelectableRow>
         );
       })}
@@ -166,7 +166,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
           <SelectableRow key={p.id} sel={sel} selColor={rs.color} onClick={() => onSelect("pipeline", p)}>
             <Dot color={rs.color} pulse={rs.label === "running"} />
             <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
-            <ToggleBtn added={isInCollection(collection, "pipeline", p.id)} color={collection.color} onClick={(e) => { e.stopPropagation(); onResourceToggle("pipeline", p.id, collection.id); }} label={isInCollection(collection, "pipeline", p.id) ? "✓" : "+"} />
+            <ResourceToggle type="pipeline" item={p} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />
           </SelectableRow>
         );
       })}
@@ -185,7 +185,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
           <SelectableRow key={pr.pullRequestId} sel={sel} selColor={status.color} onClick={() => onSelect("pr", pr)}>
             <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", width: 30 }}>#{pr.pullRequestId}</span>
             <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pr.title}</span>
-            <ToggleBtn added={isInCollection(collection, "pr", pr.pullRequestId)} color={collection.color} onClick={(e) => { e.stopPropagation(); onResourceToggle("pr", pr.pullRequestId, collection.id); }} label={isInCollection(collection, "pr", pr.pullRequestId) ? "✓" : "+"} />
+            <ResourceToggle type="pr" item={pr} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />
           </SelectableRow>
         );
       })}
@@ -203,7 +203,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
           <SelectableRow key={sc.id} sel={sel} selColor={T.cyan} onClick={() => onSelect("serviceconnection", sc)}>
             <span style={{ fontSize: 10, color: T.cyan, fontFamily: "'JetBrains Mono'", width: 40, flexShrink: 0 }}>{sc.type?.slice(0, 6) || "svc"}</span>
             <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sc.name}</span>
-            <ToggleBtn added={isInCollection(collection, "serviceconnection", sc.id)} color={collection.color} onClick={(e) => { e.stopPropagation(); onResourceToggle("serviceconnection", sc.id, collection.id); }} label={isInCollection(collection, "serviceconnection", sc.id) ? "✓" : "+"} />
+            <ResourceToggle type="serviceconnection" item={sc} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />
           </SelectableRow>
         );
       })}
@@ -222,7 +222,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
            <SelectableRow key={wp.id} sel={sel} selColor={T.green} onClick={() => onSelect("wiki", wp)}>
              <span style={{ fontSize: 10, color: T.green, fontFamily: "'JetBrains Mono'", width: 40, flexShrink: 0 }}>wiki</span>
              <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{path}</span>
-             <ToggleBtn added={isInCollection(collection, "wiki", wp.id)} color={collection.color} onClick={(e) => { e.stopPropagation(); onResourceToggle("wiki", wp.id, collection.id, wp); }} label={isInCollection(collection, "wiki", wp.id) ? "✓" : "+"} />
+             <ResourceToggle type="wiki" item={wp} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />
            </SelectableRow>
          );
        })}

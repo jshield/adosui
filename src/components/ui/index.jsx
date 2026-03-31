@@ -1,4 +1,5 @@
 import { T } from "../../lib/theme";
+import { isInCollection } from "../../lib";
 
 /* ── Pill label ────────────────────────────────────────────────── */
 export const Pill = ({ label, color }) => (
@@ -198,27 +199,51 @@ export const UserAvatar = ({ profile, size = 28 }) => (
   </div>
 );
 
-/* ── Collection toggle button ─────────────────────────────────── */
-export const ToggleBtn = ({ added, color = T.amber, onClick, label }) => (
-  <button
-    onClick={onClick}
-    style={{
-      background: added ? `${color}18` : "rgba(255,255,255,0.04)",
-      border: `1px solid ${added ? color + "44" : "rgba(255,255,255,0.08)"}`,
-      borderRadius: 4,
-      cursor: "pointer",
-      color: added ? color : T.muted,
-      fontSize: 12,
-      fontFamily: "'Barlow'",
-      padding: "6px 14px",
-      display: "inline-flex",
-      alignItems: "center",
-      gap: 4,
-    }}
-  >
-    {label || (added ? "In Collection" : "Add to Collection")}
-  </button>
-);
+/* ── Unified collection toggle button ─────────────────────────── */
+export function ResourceToggle({ type, item, collection, onResourceToggle, onWorkItemToggle, size = "compact" }) {
+  const id = type === "pr" ? item.pullRequestId : type === "workitem" ? item.id : item.id;
+  const added = collection && isInCollection(collection, type, id);
+  const color = collection?.color || T.amber;
+
+  const handleToggle = (e) => {
+    e.stopPropagation();
+    if (!collection) return;
+    if (type === "workitem") {
+      onWorkItemToggle(collection.id, id);
+    } else {
+      onResourceToggle(type, id, collection.id, type === "wiki" ? item : undefined);
+    }
+  };
+
+  if (size === "full") {
+    return (
+      <button onClick={handleToggle}
+        style={{
+          background: added ? `${color}18` : "rgba(255,255,255,0.04)",
+          border: `1px solid ${added ? color + "44" : "rgba(255,255,255,0.12)"}`,
+          borderRadius: 5, cursor: "pointer", color: added ? color : T.muted,
+          fontSize: 12, fontFamily: "'Barlow'", padding: "6px 14px",
+          display: "inline-flex", alignItems: "center", gap: 6,
+        }}>
+        {added ? `✓ In "${collection.name}"` : `+ Add to "${collection.name}"`}
+      </button>
+    );
+  }
+
+  return (
+    <button onClick={handleToggle}
+      style={{
+        background: added ? `${color}18` : "rgba(255,255,255,0.04)",
+        border: `1px solid ${added ? color + "44" : "rgba(255,255,255,0.08)"}`,
+        borderRadius: 4, cursor: "pointer", color: added ? color : T.muted,
+        fontSize: 12, fontFamily: "'JetBrains Mono'", padding: "2px 8px",
+        display: "inline-flex", alignItems: "center", gap: 4,
+        flexShrink: 0,
+      }}>
+      {added ? "✓" : "+"}
+    </button>
+  );
+}
 
 /* ── Open in ADO link ────────────────────────────────────────── */
 export const AdoLink = ({ href, children = "Open in ADO ↗" }) => (

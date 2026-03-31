@@ -1,47 +1,21 @@
 import { useState, useEffect } from "react";
 import { marked } from "marked";
 import { T } from "../../lib/theme";
-import { Field, AdoLink, Spinner } from "../ui";
-import { isInCollection, timeAgo, branchName, workItemUrl, serviceConnectionUrl, wikiPageUrl } from "../../lib";
+import { Field, AdoLink, Spinner, ResourceToggle } from "../ui";
+import { timeAgo, branchName, workItemUrl, serviceConnectionUrl, wikiPageUrl } from "../../lib";
 
 export function SearchResultDetail({ result, collection, org, client, onWorkItemToggle, onResourceToggle }) {
   if (!result) return null;
   const { type, item } = result;
 
-  const getInCollection = () => {
-    if (!collection) return false;
-    if (type === "workitem") return isInCollection(collection, "workitem", item.id);
-    if (type === "repo")     return isInCollection(collection, "repo", item.id);
-    if (type === "pipeline") return isInCollection(collection, "pipeline", item.id);
-    if (type === "pr")       return isInCollection(collection, "pr", item.pullRequestId);
-    if (type === "serviceconnection") return isInCollection(collection, "serviceconnection", item.id);
-    if (type === "wiki")      return isInCollection(collection, "wiki", item.id);
-    return false;
-  };
-  const added = getInCollection();
-
-  const handleToggle = () => {
-    if (!collection) return;
-    if (type === "workitem") onWorkItemToggle(collection.id, item.id);
-    else if (type === "repo")      onResourceToggle("repo",     item.id,              collection.id);
-    else if (type === "pipeline")  onResourceToggle("pipeline", item.id,              collection.id);
-    else if (type === "pr")        onResourceToggle("pr",       item.pullRequestId,   collection.id);
-    else if (type === "serviceconnection") onResourceToggle("serviceconnection", item.id, collection.id);
-    else if (type === "wiki")      onResourceToggle("wiki",     item.id,              collection.id, item);
-  };
-
   const containerStyle = { flex: 1, overflowY: "auto", padding: 24 };
 
-  const ToggleSection = () => (
+  const Toggle = () => (
     <div style={{ marginBottom: 16 }}>
-      {collection ? (
-        <button onClick={handleToggle}
-          style={{ background: added ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${added ? T.green : "rgba(255,255,255,0.15)"}`, borderRadius: 5, color: added ? T.green : T.muted, cursor: "pointer", padding: "6px 14px", fontSize: 12, fontFamily: "'Barlow'" }}>
-          {added ? `✓ In "${collection.name}"` : `+ Add to "${collection.name}"`}
-        </button>
-      ) : (
-        <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>Select a collection to add this item</span>
-      )}
+      {collection
+        ? <ResourceToggle type={type} item={item} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} size="full" />
+        : <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>Select a collection to add this item</span>
+      }
     </div>
   );
 
@@ -64,7 +38,7 @@ export function SearchResultDetail({ result, collection, org, client, onWorkItem
           <span style={{ fontSize: 11, color: T.text, background: "rgba(255,255,255,0.08)", borderRadius: 4, padding: "1px 7px", fontFamily: "'Barlow Condensed'" }}>{wiState}</span>
         </div>
         <div style={{ fontSize: 17, fontWeight: 600, color: T.text, marginBottom: 14, lineHeight: 1.35 }}>{wiTitle}</div>
-        <ToggleSection />
+        <Toggle />
         {adoUrl && <AdoLink href={adoUrl} />}
         <div>
           <Field label="State"       value={wiState} />
@@ -87,7 +61,7 @@ export function SearchResultDetail({ result, collection, org, client, onWorkItem
           <span style={{ fontSize: 9, fontWeight: 700, color: T.cyan, background: `${T.cyan}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>REPO</span>
         </div>
         <div style={{ fontSize: 17, fontWeight: 600, color: T.cyan, marginBottom: 14, lineHeight: 1.35 }}>{item.name}</div>
-        <ToggleSection />
+        <Toggle />
         <div>
           <Field label="Default Branch" value={defaultBranch} />
           {size      && <Field label="Size"    value={size} />}
@@ -106,7 +80,7 @@ export function SearchResultDetail({ result, collection, org, client, onWorkItem
           <span style={{ fontSize: 9, fontWeight: 700, color: T.amber, background: `${T.amber}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>PIPELINE</span>
         </div>
         <div style={{ fontSize: 17, fontWeight: 600, color: T.text, marginBottom: 14, lineHeight: 1.35 }}>{item.name}</div>
-        <ToggleSection />
+        <Toggle />
         <div>
           {folder && <Field label="Folder"        value={folder} />}
           <Field label="Definition ID" value={String(item.id)} />
@@ -130,7 +104,7 @@ export function SearchResultDetail({ result, collection, org, client, onWorkItem
           <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>#{item.pullRequestId}</span>
         </div>
         <div style={{ fontSize: 16, fontWeight: 600, color: T.text, marginBottom: 14, lineHeight: 1.35 }}>{item.title}</div>
-        <ToggleSection />
+        <Toggle />
         <div>
           <Field label="Author"        value={author} />
           <Field label="Source Branch" value={source} />
@@ -153,7 +127,7 @@ export function SearchResultDetail({ result, collection, org, client, onWorkItem
           <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>{item.type || "service"}</span>
         </div>
         <div style={{ fontSize: 17, fontWeight: 600, color: T.cyan, marginBottom: 14, lineHeight: 1.35 }}>{item.name}</div>
-        <ToggleSection />
+        <Toggle />
         {project && <AdoLink href={serviceConnectionUrl(org, project, item.id)} />}
         <div>
           <Field label="ID"          value={item.id || "—"} />
@@ -171,9 +145,9 @@ export function SearchResultDetail({ result, collection, org, client, onWorkItem
       item={item}
       org={org}
       collection={collection}
-      added={added}
-      handleToggle={handleToggle}
       client={client}
+      onResourceToggle={onResourceToggle}
+      onWorkItemToggle={onWorkItemToggle}
       containerStyle={containerStyle}
     />;
   }
@@ -181,7 +155,7 @@ export function SearchResultDetail({ result, collection, org, client, onWorkItem
   return null;
 }
 
-function WikiDetail({ item, org, collection, added, handleToggle, client, containerStyle }) {
+function WikiDetail({ item, org, collection, client, onResourceToggle, onWorkItemToggle, containerStyle }) {
   const wikiId = item._wikiId || item.wikiId || "";
   const wikiName = item._wikiName || item.wikiName || "";
   const project = item._projectName || item.project || "";
@@ -216,14 +190,10 @@ function WikiDetail({ item, org, collection, added, handleToggle, client, contai
       </div>
       <div style={{ fontSize: 17, fontWeight: 600, color: T.green, marginBottom: 14, lineHeight: 1.35 }}>{pagePath}</div>
       <div style={{ marginBottom: 16 }}>
-        {collection ? (
-          <button onClick={handleToggle}
-            style={{ background: added ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${added ? T.green : "rgba(255,255,255,0.15)"}`, borderRadius: 5, color: added ? T.green : T.muted, cursor: "pointer", padding: "6px 14px", fontSize: 12, fontFamily: "'Barlow'" }}>
-            {added ? `✓ In "${collection.name}"` : `+ Add to "${collection.name}"`}
-          </button>
-        ) : (
-          <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>Select a collection to add this item</span>
-        )}
+        {collection
+          ? <ResourceToggle type="wiki" item={item} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} size="full" />
+          : <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>Select a collection to add this item</span>
+        }
       </div>
       {url && <AdoLink href={url} />}
       {loading && <div style={{ display: "flex", alignItems: "center", gap: 8, color: T.dim, fontSize: 12, marginTop: 12 }}><Spinner size={14} /> Loading…</div>}

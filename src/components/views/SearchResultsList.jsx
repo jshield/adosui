@@ -1,5 +1,5 @@
-import { T, WI_TYPE_COLOR, stateColor, branchName, isInCollection } from "../../lib";
-import { Spinner, SectionLabel, SelectableRow, EmptyState } from "../ui";
+import { T, WI_TYPE_COLOR, stateColor, branchName } from "../../lib";
+import { Spinner, SectionLabel, SelectableRow, EmptyState, ResourceToggle } from "../ui";
 
 export function SearchResultsList({ results, searching, searchQuery, collection, selectedResult, onSelect, onWorkItemToggle, onResourceToggle }) {
   if (searching) {
@@ -37,12 +37,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                   <span style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wi.fields?.["System.Title"]}</span>
                   <span style={{ fontSize: 10, color: stateColor(wiState), fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>{wiState}</span>
                 </div>
-                {collection && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onWorkItemToggle(collection.id, wi.id); }}
-                    style={{ background: isInCollection(collection, "workitem", wi.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "workitem", wi.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "workitem", wi.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
-                  >{isInCollection(collection, "workitem", wi.id) ? "✓" : "+"}</button>
-                )}
+                {collection && <ResourceToggle type="workitem" item={wi} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />}
               </SelectableRow>
             );
           })}
@@ -61,12 +56,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                   <span style={{ fontSize: 12, flex: 1, color: T.cyan, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
                   <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>{branchName(r.defaultBranch)}</span>
                 </div>
-                {collection && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onResourceToggle("repo", r.id, collection.id); }}
-                    style={{ background: isInCollection(collection, "repo", r.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "repo", r.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "repo", r.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
-                  >{isInCollection(collection, "repo", r.id) ? "✓" : "+"}</button>
-                )}
+                {collection && <ResourceToggle type="repo" item={r} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />}
               </SelectableRow>
             );
           })}
@@ -85,12 +75,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                   <span style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
                   <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>{p.folder !== "\\" ? p.folder : ""}</span>
                 </div>
-                {collection && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onResourceToggle("pipeline", p.id, collection.id); }}
-                    style={{ background: isInCollection(collection, "pipeline", p.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "pipeline", p.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "pipeline", p.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
-                  >{isInCollection(collection, "pipeline", p.id) ? "✓" : "+"}</button>
-                )}
+                {collection && <ResourceToggle type="pipeline" item={p} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />}
               </SelectableRow>
             );
           })}
@@ -111,12 +96,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                   <span style={{ fontSize: 12, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pr.title}</span>
                   <span style={{ fontSize: 10, color: stateColor(prState), fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>{prState}</span>
                 </div>
-                {collection && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onResourceToggle("pr", pr.pullRequestId, collection.id); }}
-                    style={{ background: isInCollection(collection, "pr", pr.pullRequestId) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "pr", pr.pullRequestId) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "pr", pr.pullRequestId) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
-                  >{isInCollection(collection, "pr", pr.pullRequestId) ? "✓" : "+"}</button>
-                )}
+                {collection && <ResourceToggle type="pr" item={pr} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />}
               </SelectableRow>
             );
           })}
@@ -135,12 +115,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                   <span style={{ fontSize: 12, flex: 1, color: T.cyan, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sc.name}</span>
                   <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>{sc.type || ""}</span>
                 </div>
-                {collection && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onResourceToggle("serviceconnection", sc.id, collection.id); }}
-                    style={{ background: isInCollection(collection, "serviceconnection", sc.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "serviceconnection", sc.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "serviceconnection", sc.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
-                  >{isInCollection(collection, "serviceconnection", sc.id) ? "✓" : "+"}</button>
-                )}
+                {collection && <ResourceToggle type="serviceconnection" item={sc} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />}
               </SelectableRow>
             );
           })}
@@ -161,12 +136,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                   <span style={{ fontSize: 12, flex: 1, color: T.green, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayPath}</span>
                   <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}>{wikiLabel}</span>
                 </div>
-                {collection && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onResourceToggle("wiki", wp.id, collection.id, wp); }}
-                    style={{ background: isInCollection(collection, "wiki", wp.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "wiki", wp.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "wiki", wp.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
-                  >{isInCollection(collection, "wiki", wp.id) ? "✓" : "+"}</button>
-                )}
+                {collection && <ResourceToggle type="wiki" item={wp} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />}
               </SelectableRow>
             );
           })}
