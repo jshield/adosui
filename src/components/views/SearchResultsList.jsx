@@ -163,7 +163,7 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
                 </div>
                 {collection && (
                   <button
-                    onClick={e => { e.stopPropagation(); onResourceToggle("wiki", wp.id, collection.id); }}
+                    onClick={e => { e.stopPropagation(); onResourceToggle("wiki", wp.id, collection.id, wp); }}
                     style={{ background: isInCollection(collection, "wiki", wp.id) ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${isInCollection(collection, "wiki", wp.id) ? T.green : "rgba(255,255,255,0.12)"}`, borderRadius: 4, color: isInCollection(collection, "wiki", wp.id) ? T.green : T.dim, cursor: "pointer", padding: "2px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", flexShrink: 0 }}
                   >{isInCollection(collection, "wiki", wp.id) ? "✓" : "+"}</button>
                 )}

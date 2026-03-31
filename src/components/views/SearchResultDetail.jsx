@@ -1,8 +1,10 @@
+import { useState, useEffect } from "react";
+import { marked } from "marked";
 import { T } from "../../lib/theme";
-import { Field, AdoLink } from "../ui";
+import { Field, AdoLink, Spinner } from "../ui";
 import { isInCollection, timeAgo, branchName, workItemUrl, serviceConnectionUrl, wikiPageUrl } from "../../lib";
 
-export function SearchResultDetail({ result, collection, org, onWorkItemToggle, onResourceToggle }) {
+export function SearchResultDetail({ result, collection, org, client, onWorkItemToggle, onResourceToggle }) {
   if (!result) return null;
   const { type, item } = result;
 
@@ -25,7 +27,7 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
     else if (type === "pipeline")  onResourceToggle("pipeline", item.id,              collection.id);
     else if (type === "pr")        onResourceToggle("pr",       item.pullRequestId,   collection.id);
     else if (type === "serviceconnection") onResourceToggle("serviceconnection", item.id, collection.id);
-    else if (type === "wiki")      onResourceToggle("wiki",     item.id,              collection.id);
+    else if (type === "wiki")      onResourceToggle("wiki",     item.id,              collection.id, item);
   };
 
   const containerStyle = { flex: 1, overflowY: "auto", padding: 24 };
@@ -165,28 +167,72 @@ export function SearchResultDetail({ result, collection, org, onWorkItemToggle, 
   }
 
   if (type === "wiki") {
-    const wikiId = item._wikiId || item.wikiId || "";
-    const wikiName = item._wikiName || item.wikiName || "";
-    const project = item._projectName || item.project || "";
-    const pagePath = item.path || item.name || "";
-    const url = wikiPageUrl(org, project, wikiId, pagePath);
-    return (
-      <div style={containerStyle}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, color: T.green, background: `${T.green}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>WIKI</span>
-          <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>{wikiName}</span>
-        </div>
-        <div style={{ fontSize: 17, fontWeight: 600, color: T.green, marginBottom: 14, lineHeight: 1.35 }}>{pagePath}</div>
-        <ToggleSection />
-        {url && <AdoLink href={url} />}
-        <div>
-          <Field label="Wiki"    value={wikiName || "—"} />
-          <Field label="Page ID" value={item.id || "—"} />
-          {project && <Field label="Project" value={project} />}
-        </div>
-      </div>
-    );
+    return <WikiDetail
+      item={item}
+      org={org}
+      collection={collection}
+      added={added}
+      handleToggle={handleToggle}
+      client={client}
+      containerStyle={containerStyle}
+    />;
   }
 
   return null;
+}
+
+function WikiDetail({ item, org, collection, added, handleToggle, client, containerStyle }) {
+  const wikiId = item._wikiId || item.wikiId || "";
+  const wikiName = item._wikiName || item.wikiName || "";
+  const project = item._projectName || item.project || "";
+  const pagePath = item.path || item.name || "";
+  const url = wikiPageUrl(org, project, wikiId, pagePath);
+
+  const [content, setContent] = useState("");
+  const [rendered, setRendered] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!client || !wikiId || !pagePath) return;
+    let cancelled = false;
+    setLoading(true);
+    client.getWikiPageContent(wikiId, pagePath, project, item._pageId)
+      .then(md => {
+        if (cancelled) return;
+        setContent(md);
+        if (md) setRendered(marked.parse(md));
+        else setRendered("");
+      })
+      .catch(() => { if (!cancelled) { setContent(""); setRendered(""); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [client, wikiId, pagePath]);
+
+  return (
+    <div style={containerStyle}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: T.green, background: `${T.green}22`, borderRadius: 4, padding: "2px 7px", fontFamily: "'JetBrains Mono'" }}>WIKI</span>
+        <span style={{ fontSize: 11, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>{wikiName}</span>
+      </div>
+      <div style={{ fontSize: 17, fontWeight: 600, color: T.green, marginBottom: 14, lineHeight: 1.35 }}>{pagePath}</div>
+      <div style={{ marginBottom: 16 }}>
+        {collection ? (
+          <button onClick={handleToggle}
+            style={{ background: added ? `${T.green}22` : "rgba(255,255,255,0.06)", border: `1px solid ${added ? T.green : "rgba(255,255,255,0.15)"}`, borderRadius: 5, color: added ? T.green : T.muted, cursor: "pointer", padding: "6px 14px", fontSize: 12, fontFamily: "'Barlow'" }}>
+            {added ? `✓ In "${collection.name}"` : `+ Add to "${collection.name}"`}
+          </button>
+        ) : (
+          <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>Select a collection to add this item</span>
+        )}
+      </div>
+      {url && <AdoLink href={url} />}
+      {loading && <div style={{ display: "flex", alignItems: "center", gap: 8, color: T.dim, fontSize: 12, marginTop: 12 }}><Spinner size={14} /> Loading…</div>}
+      {rendered && (
+        <div
+          style={{ marginTop: 12, fontSize: 13, color: T.text, lineHeight: 1.6 }}
+          dangerouslySetInnerHTML={{ __html: rendered }}
+        />
+      )}
+    </div>
+  );
 }

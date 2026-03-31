@@ -23,42 +23,48 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
     const fetchItems = async () => {
       try {
         const promises = [];
-        
+        const projects = collection.projects?.length ? collection.projects : [];
+
         if (collection.workItemIds?.length > 0) {
           const ids = collection.workItemIds.map(id => parseInt(id));
-          promises.push(client.searchWorkItems("", {}).then(all => all.filter(wi => ids.includes(wi.id))));
+          promises.push(client.searchWorkItems("", {}, projects).then(all => all.filter(wi => ids.includes(wi.id))));
         } else if (search || filters.types.length > 0 || filters.states.length > 0 || filters.assignee || filters.areaPath) {
-          promises.push(client.searchWorkItems(search, filters));
+          promises.push(client.searchWorkItems(search, filters, projects));
         } else {
           promises.push(Promise.resolve([]));
         }
 
         if (repoIds.length > 0) {
-          promises.push(client.getAllRepos().then(all => all.filter(r => repoIds.includes(r.id))));
+          const fetchRepos = projects.length ? client.getReposForProjects(projects) : client.getAllRepos();
+          promises.push(fetchRepos.then(all => all.filter(r => repoIds.includes(r.id))));
         } else {
           promises.push(Promise.resolve([]));
         }
 
         if (pipelineIds.length > 0) {
-          promises.push(client.getAllPipelines().then(all => all.filter(p => pipelineIds.includes(String(p.id)))));
+          const fetchPipes = projects.length ? client.getPipelinesForProjects(projects) : client.getAllPipelines();
+          promises.push(fetchPipes.then(all => all.filter(p => pipelineIds.includes(String(p.id)))));
         } else {
           promises.push(Promise.resolve([]));
         }
 
         if (prIds.length > 0) {
-          promises.push(client.getAllPullRequests().then(all => all.filter(pr => prIds.includes(String(pr.pullRequestId)))));
+          const fetchPrs = projects.length ? client.getPullRequestsForProjects(projects) : client.getAllPullRequests();
+          promises.push(fetchPrs.then(all => all.filter(pr => prIds.includes(String(pr.pullRequestId)))));
         } else {
           promises.push(Promise.resolve([]));
         }
 
         if (serviceConnectionIds.length > 0) {
-          promises.push(client.getAllServiceConnections().then(all => all.filter(sc => serviceConnectionIds.includes(String(sc.id)))));
+          const fetchScs = projects.length ? client.getServiceConnectionsForProjects(projects) : client.getAllServiceConnections();
+          promises.push(fetchScs.then(all => all.filter(sc => serviceConnectionIds.includes(String(sc.id)))));
         } else {
           promises.push(Promise.resolve([]));
         }
 
         if (wikiPageIds.length > 0) {
-          promises.push(client.getAllWikiPages().then(all => all.filter(wp => wikiPageIds.includes(String(wp.id)))));
+          // Wiki pages already store their metadata in the collection — no API call needed
+          promises.push(Promise.resolve(collection.wikiPages || []));
         } else {
           promises.push(Promise.resolve([]));
         }
@@ -216,7 +222,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
            <SelectableRow key={wp.id} sel={sel} selColor={T.green} onClick={() => onSelect("wiki", wp)}>
              <span style={{ fontSize: 10, color: T.green, fontFamily: "'JetBrains Mono'", width: 40, flexShrink: 0 }}>wiki</span>
              <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{path}</span>
-             <ToggleBtn added={isInCollection(collection, "wiki", wp.id)} color={collection.color} onClick={(e) => { e.stopPropagation(); onResourceToggle("wiki", wp.id, collection.id); }} label={isInCollection(collection, "wiki", wp.id) ? "✓" : "+"} />
+             <ToggleBtn added={isInCollection(collection, "wiki", wp.id)} color={collection.color} onClick={(e) => { e.stopPropagation(); onResourceToggle("wiki", wp.id, collection.id, wp); }} label={isInCollection(collection, "wiki", wp.id) ? "✓" : "+"} />
            </SelectableRow>
          );
        })}

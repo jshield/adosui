@@ -68,34 +68,39 @@ export class ADOClient {
     return this._projects;
   }
 
-  async searchWorkItems(searchTerm = "", filters = {}) {
+  async searchWorkItems(searchTerm = "", filters = {}, projectNames = []) {
     let wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] IN ('Epic','Feature','User Story','Bug','Task') AND [System.State] NOT IN ('Closed','Removed')`;
-    
+
     if (filters.types?.length) {
       const types = filters.types.map(t => `'${t}'`).join(",");
       wiql = wiql.replace(`IN ('Epic','Feature','User Story','Bug','Task')`, `IN (${types})`);
     }
-    
+
+    if (projectNames.length) {
+      const projects = projectNames.map(p => `'${p.replace(/'/g, "''")}'`).join(",");
+      wiql += ` AND [System.TeamProject] IN (${projects})`;
+    }
+
     if (filters.states?.length) {
       const states = filters.states.map(s => `'${s}'`).join(",");
       wiql += ` AND [System.State] IN (${states})`;
     }
-    
+
     if (filters.assignee) {
       const a = filters.assignee.replace(/'/g, "''");
       wiql += ` AND [System.AssignedTo] CONTAINS '${a}'`;
     }
-    
+
     if (filters.areaPath) {
       const a = filters.areaPath.replace(/'/g, "''");
       wiql += ` AND [System.AreaPath] UNDER '${a}'`;
     }
-    
+
     if (searchTerm.trim()) {
       const term = searchTerm.replace(/'/g, "''");
       wiql += ` AND ([System.Title] CONTAINS '${term}' OR [System.Description] CONTAINS '${term}')`;
     }
-    
+
     wiql += " ORDER BY [System.ChangedDate] DESC";
     
     const r = await this._fetch(
@@ -147,80 +152,79 @@ export class ADOClient {
     return r;
   }
 
-  async getAllRepos(forceRefresh = false) {
-    if (forceRefresh) cache.invalidate("repos-");
-    return this._cachedFetch("repos-all", async () => {
+  /**
+   * Read per-project cache populated by the background worker.
+   * For cache misses, fetch live and write to the per-project cache.
+   */
+  async _getProjectCached(projectName, cacheKey, fetcher) {
+    const key = `project:${projectName}:${cacheKey}`;
+    const cached = cache.get(key);
+    if (cached) return cached;
+    try {
+      const data = await fetcher(projectName);
+      data.forEach(item => { item._projectName = projectName; });
+      cache.set(key, data, 5 * 60 * 1000);
+      return data;
+    } catch {
+      return [];
+    }
+  }
+
+  async _collectFromProjects(cacheKey, fetcher, projectNames, forceRefresh) {
+    if (forceRefresh) cache.invalidate(cacheKey);
+    if (!projectNames.length) {
       if (!this._projects.length) await this.getProjects();
-      const all = [];
-      for (const p of this._projects.slice(0, 10)) {
-        try { 
-          const repos = await this.getRepos(p.name);
-          repos.forEach(repo => { repo._projectName = p.name; });
-          all.push(...repos); 
-        } catch {}
-      }
-      return all;
-    });
+      projectNames = this._projects.map(p => p.name);
+    }
+    const all = [];
+    for (const name of projectNames) {
+      const items = await this._getProjectCached(name, cacheKey, fetcher);
+      all.push(...items);
+    }
+    return all;
+  }
+
+  async getAllRepos(forceRefresh = false) {
+    if (forceRefresh) cache.invalidate("project:");
+    return this._collectFromProjects("repos", n => this.getRepos(n), [], forceRefresh);
   }
 
   async getAllPipelines(forceRefresh = false) {
-    if (forceRefresh) cache.invalidate("pipelines-");
-    return this._cachedFetch("pipelines-all", async () => {
-      if (!this._projects.length) await this.getProjects();
-      const all = [];
-      for (const p of this._projects.slice(0, 10)) {
-        try { 
-          const pipelines = await this.getPipelines(p.name);
-          pipelines.forEach(pl => { pl._projectName = p.name; });
-          all.push(...pipelines); 
-        } catch {}
-      }
-      return all;
-    });
+    if (forceRefresh) cache.invalidate("project:");
+    return this._collectFromProjects("pipelines", n => this.getPipelines(n), [], forceRefresh);
   }
 
   async getAllPullRequests(forceRefresh = false) {
-    if (forceRefresh) cache.invalidate("prs-");
-    return this._cachedFetch("prs-all", async () => {
-      if (!this._projects.length) await this.getProjects();
-      const all = [];
-      for (const p of this._projects.slice(0, 10)) {
-        try { 
-          const prs = await this.getPullRequests(p.name);
-          prs.forEach(pr => { pr._projectName = p.name; });
-          all.push(...prs); 
-        } catch {}
-      }
-      return all;
-    });
+    if (forceRefresh) cache.invalidate("project:");
+    return this._collectFromProjects("prs", n => this.getPullRequests(n), [], forceRefresh);
   }
 
   async getAllTestRuns(forceRefresh = false) {
-    if (forceRefresh) cache.invalidate("tests-");
-    return this._cachedFetch("tests-all", async () => {
-      if (!this._projects.length) await this.getProjects();
-      const all = [];
-      for (const p of this._projects.slice(0, 10)) {
-        try { all.push(...await this.getTestRuns(p.name)); } catch {}
-      }
-      return all;
-    });
+    if (forceRefresh) cache.invalidate("project:");
+    return this._collectFromProjects("testRuns", n => this.getTestRuns(n), [], forceRefresh);
   }
 
   async getAllServiceConnections(forceRefresh = false) {
-    if (forceRefresh) cache.invalidate("serviceconnections-");
-    return this._cachedFetch("serviceconnections-all", async () => {
-      if (!this._projects.length) await this.getProjects();
-      const all = [];
-      for (const p of this._projects.slice(0, 10)) {
-        try {
-          const scs = await this.getServiceConnections(p.name);
-          scs.forEach(sc => { sc._projectName = p.name; });
-          all.push(...scs);
-        } catch {}
-      }
-      return all;
-    });
+    if (forceRefresh) cache.invalidate("project:");
+    return this._collectFromProjects("serviceConnections", n => this.getServiceConnections(n), [], forceRefresh);
+  }
+
+  // ── Project-scoped variants ───────────────────────────────────────────────
+
+  async getReposForProjects(projectNames) {
+    return this._collectFromProjects("repos", n => this.getRepos(n), projectNames);
+  }
+
+  async getPipelinesForProjects(projectNames) {
+    return this._collectFromProjects("pipelines", n => this.getPipelines(n), projectNames);
+  }
+
+  async getPullRequestsForProjects(projectNames) {
+    return this._collectFromProjects("prs", n => this.getPullRequests(n), projectNames);
+  }
+
+  async getServiceConnectionsForProjects(projectNames) {
+    return this._collectFromProjects("serviceConnections", n => this.getServiceConnections(n), projectNames);
   }
 
   async getRepos(project) {
@@ -500,74 +504,37 @@ export class ADOClient {
     return res.json();
   }
 
-  // Helper to recursively flatten wiki pages hierarchy
-  flattenWikiPages(page, wikiId, wikiName, projectName) {
-    // Use composite ID (wikiId:path) for collection membership
-    // Store original API page ID for content fetching
-    const compositeId = `${wikiId}:${page.path}`;
-    const apiPageId = page.id;  // Original numeric ID from API
-    const result = [{
-      ...page,
-      id: compositeId,
-      _pageId: apiPageId,
-      _wikiId: wikiId,
-      _wikiName: wikiName,
-      _projectName: projectName,
-    }];
-    if (page.subPages && page.subPages.length > 0) {
-      page.subPages.forEach(sub => {
-        result.push(...this.flattenWikiPages(sub, wikiId, wikiName, projectName));
-      });
-    }
-    return result;
-  }
+  // ── Wiki Search API ──────────────────────────────────────────────────────
 
-  async getWikiPagesForProject(project) {
-    try {
-      const wikis = await this.listWikis(project);
-      const allPages = [];
-      for (const wiki of wikis) {
-        try {
-          const url = `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${wiki.id}/pages?api-version=7.1&recursionLevel=1`;
-          const r = await this._fetch(url);
-          if (r && r.path) {
-            const pages = this.flattenWikiPages(r, wiki.id, wiki.name, project);
-            allPages.push(...pages);
-          }
-        } catch { /* skip wikis we can't access */ }
-      }
-      return allPages;
-    } catch {
-      return [];
+  /**
+   * Search wiki pages using the ADO almsearch API.
+   * Always uses server-side full-text search. projects is optional —
+   * omit to search the entire org.
+   */
+  async searchWikiPages(searchText, projectNames = []) {
+    const body = { searchText, $top: 20 };
+    if (projectNames.length) {
+      body.filters = { Project: projectNames };
     }
-  }
-
-  async getAllWikiPages(forceRefresh = false) {
-    if (forceRefresh) cache.invalidate("wiki-pages-");
-    return this._cachedFetch("wiki-pages-all", async () => {
-      const allPages = [];
-      let wikis = [];
-      try {
-        wikis = await this.listWikis();
-      } catch { /* org-level wikis may not exist */ }
-      for (const wiki of wikis) {
-        try {
-          const url = `${this.base}/_apis/wiki/wikis/${wiki.id}/pages?api-version=7.1&recursionLevel=1`;
-          const r = await this._fetch(url);
-          if (r && r.path) {
-            const pages = this.flattenWikiPages(r, wiki.id, wiki.name, "");
-            allPages.push(...pages);
-          }
-        } catch { /* skip wikis we can't access */ }
-      }
-      if (!this._projects.length) await this.getProjects();
-      for (const p of this._projects.slice(0, 20)) {
-        try {
-          const projPages = await this.getWikiPagesForProject(p.name);
-          allPages.push(...projPages);
-        } catch { /* skip projects we can't access */ }
-      }
-      return allPages;
+    const searchBase = `https://almsearch.dev.azure.com/${encodeURIComponent(this.org)}`;
+    const r = await this._fetch(
+      `${searchBase}/_apis/search/wikisearchresults?api-version=7.1`,
+      { method: "POST", body: JSON.stringify(body) }
+    );
+    return (r.results || []).map(result => {
+      const pagePath = (result.path || "").replace(/\.md$/i, "");
+      return {
+        id: `${result.wiki?.id || ""}:${pagePath}`,
+        path: pagePath,
+        name: (result.fileName || "").replace(/\.md$/i, ""),
+        wikiId: result.wiki?.id || "",
+        _wikiId: result.wiki?.id || "",
+        _wikiName: result.wiki?.name || "",
+        _pageId: null,
+        wikiName: result.wiki?.name || "",
+        project: result.project?.name || "",
+        _projectName: result.project?.name || "",
+      };
     });
   }
 
@@ -582,27 +549,26 @@ export class ADOClient {
   }
 
   async getWikiPageContent(wikiId, pagePath, projectName, apiPageId) {
-    try {
-      const projectPart = projectName ? `${encodeURIComponent(projectName)}/` : "";
-      let url;
-      if (apiPageId) {
-        // Use page ID endpoint: /pages/{pageId}
-        url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages/${encodeURIComponent(apiPageId)}?includeContent=true&api-version=7.1`;
-      } else {
-        // Use path endpoint: /pages?path={path}
-        url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages?path=${encodeURIComponent(pagePath)}&includeContent=true&api-version=7.1`;
+    const cacheKey = `wiki:content:${wikiId}:${pagePath || apiPageId}`;
+    return this._cachedFetch(cacheKey, async () => {
+      try {
+        const projectPart = projectName ? `${encodeURIComponent(projectName)}/` : "";
+        let url;
+        if (apiPageId) {
+          url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages/${encodeURIComponent(apiPageId)}?includeContent=true&api-version=7.1`;
+        } else {
+          url = `${this.base}/${projectPart}_apis/wiki/wikis/${encodeURIComponent(wikiId)}/pages?path=${encodeURIComponent(pagePath)}&includeContent=true&api-version=7.1`;
+        }
+        const r = await this._fetch(url);
+        let content = r.content;
+        if (content && typeof content !== "string") {
+          content = typeof content === "object" ? JSON.stringify(content) : String(content);
+        }
+        return content || "";
+      } catch {
+        return "";
       }
-      const r = await this._fetch(url);
-      let content = r.content;
-      // Handle case where content might be an object
-      if (content && typeof content !== "string") {
-        // Try to stringify if it's an object, or convert to string
-        content = typeof content === "object" ? JSON.stringify(content) : String(content);
-      }
-      return content || "";
-    } catch {
-      return "";
-    }
+    });
   }
 
   // ── Pipeline Timeline & Logs API ─────────────────────────────────────────

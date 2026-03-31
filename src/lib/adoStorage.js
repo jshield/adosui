@@ -119,6 +119,9 @@ export function migrateCollection(raw) {
   // Ensure filters exists
   if (!col.filters) col.filters = { types: [], states: [], assignee: "", areaPath: "" };
 
+  // Ensure projects exists (optional project scope for search optimization)
+  if (!Array.isArray(col.projects)) col.projects = [];
+
   return col;
 }
 
@@ -134,6 +137,7 @@ function serialise(collection) {
     scope:    collection.scope || "shared",
     owner:    collection.owner || null,
     filters:  collection.filters || { types: [], states: [], assignee: "", areaPath: "" },
+    projects: (collection.projects || []).map(String),
     comments: collection.comments || [],
     workItemIds: (collection.workItemIds || []).map(String),
     repos:    (collection.repos || []).map(r => ({
@@ -331,6 +335,7 @@ export class ADOStorage {
       scope:    "personal",
       owner:    profile?.id || null,
       filters:  { types: [], states: [], assignee: "", areaPath: "" },
+      projects: [],
       comments: [],
       workItemIds: [],
       repos:    [],

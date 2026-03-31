@@ -150,26 +150,23 @@ class BackgroundWorker {
   async refreshProject(projectName) {
     const keyPrefix = `project:${projectName}:`;
 
+    let repos = [];
     try {
-      const repos = await this.client.getRepos(projectName);
+      repos = await this.client.getRepos(projectName);
+      repos.forEach(r => { r._projectName = projectName; });
       cache.set(keyPrefix + "repos", repos, CACHE_TTL);
     } catch (e) {}
 
+    let pipelines = [];
     try {
-      const pipelines = await this.client.getPipelines(projectName);
+      pipelines = await this.client.getPipelines(projectName);
+      pipelines.forEach(p => { p._projectName = projectName; });
       cache.set(keyPrefix + "pipelines", pipelines, CACHE_TTL);
     } catch (e) {}
 
     // Fetch latest run for each pipeline using a batched builds call.
     try {
       const runsMap = {};
-      let pipelines = [];
-      try {
-        pipelines = await this.client.getPipelines(projectName);
-      } catch (e) {
-        pipelines = [];
-      }
-
       if (pipelines.length) {
         // Batch definition IDs into chunks to reduce requests
         const defIds = pipelines.map(p => p.id);
@@ -213,6 +210,7 @@ class BackgroundWorker {
 
     try {
       const prs = await this.client.getPullRequests(projectName);
+      prs.forEach(pr => { pr._projectName = projectName; });
       cache.set(keyPrefix + "prs", prs, CACHE_TTL);
     } catch (e) {}
 
@@ -223,12 +221,8 @@ class BackgroundWorker {
 
     try {
       const serviceConnections = await this.client.getServiceConnections(projectName);
+      serviceConnections.forEach(sc => { sc._projectName = projectName; });
       cache.set(keyPrefix + "serviceConnections", serviceConnections, CACHE_TTL);
-    } catch (e) {}
-
-    try {
-      const wikiPages = await this.client.getWikiPagesForProject(projectName);
-      cache.set(keyPrefix + "wikiPages", wikiPages, CACHE_TTL);
     } catch (e) {}
   }
 }

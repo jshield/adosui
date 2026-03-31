@@ -199,6 +199,7 @@ export default function App() {
       scope: "shared",
       owner: null,
       filters: { types: [], states: [], assignee: "", areaPath: "" },
+      projects: col.projects || [],
       workItemIds: [],
       repos: [],
       pipelines: [],
@@ -215,6 +216,10 @@ export default function App() {
     if (!activeCol) return;
     updateCollection(activeCol, c => ({ ...c, filters }));
   }, [activeCol, updateCollection]);
+
+  const handleCollectionProjectChange = useCallback((colId, projects) => {
+    updateCollection(colId, c => ({ ...c, projects }));
+  }, [updateCollection]);
 
   const handleCollectionDelete = useCallback(async (colId) => {
     const col = collections.find(c => c.id === colId);
@@ -237,7 +242,7 @@ export default function App() {
     });
   }, [updateCollection]);
 
-  const handleResourceToggle = useCallback((type, resourceId, colId) => {
+  const handleResourceToggle = useCallback((type, resourceId, colId, wikiItem) => {
     updateCollection(colId, c => {
       const rid = String(resourceId);
       if (type === "repo") {
@@ -262,7 +267,17 @@ export default function App() {
       if (type === "wiki") {
         const wps = c.wikiPages || [];
         const exists = wps.some(wp => String(wp.id) === rid);
-        return { ...c, wikiPages: exists ? wps.filter(wp => String(wp.id) !== rid) : [...wps, { id: rid, path: "", wikiId: "", wikiName: "", project: "", comments: [] }] };
+        if (exists) return { ...c, wikiPages: wps.filter(wp => String(wp.id) !== rid) };
+        // Preserve metadata from the wiki item if provided (almsearch results)
+        const item = wikiItem;
+        return { ...c, wikiPages: [...wps, {
+          id:       rid,
+          path:     (item?.path || item?.name || "").replace(/\.md$/i, ""),
+          wikiId:   item?._wikiId || item?.wikiId || "",
+          wikiName: item?._wikiName || item?.wikiName || "",
+          project:  item?._projectName || item?.project || "",
+          comments: [],
+        }] };
       }
       return c;
     });
@@ -410,13 +425,16 @@ export default function App() {
     setSearching(true);
     try {
       const lower = q.toLowerCase();
+      const col = collections.find(c => c.id === activeCol);
+      const projects = col?.projects?.length ? col.projects : [];
+
       const [wi, repos, pipelines, prs, scs, wikis] = await Promise.allSettled([
-        client.searchWorkItems(q, {}),
-        client.getAllRepos(),
-        client.getAllPipelines(),
-        client.getAllPullRequests(),
-        client.getAllServiceConnections(),
-        client.getAllWikiPages(),
+        client.searchWorkItems(q, {}, projects),
+        projects.length ? client.getReposForProjects(projects) : client.getAllRepos(),
+        projects.length ? client.getPipelinesForProjects(projects) : client.getAllPipelines(),
+        projects.length ? client.getPullRequestsForProjects(projects) : client.getAllPullRequests(),
+        projects.length ? client.getServiceConnectionsForProjects(projects) : client.getAllServiceConnections(),
+        client.searchWikiPages(q, projects),
       ]);
       setSearchResults({
         workItems:         wi.status === "fulfilled" ? wi.value.slice(0, 20) : [],
@@ -424,14 +442,14 @@ export default function App() {
         pipelines:         pipelines.status === "fulfilled" ? pipelines.value.filter(p => p.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
         prs:               prs.status === "fulfilled" ? prs.value.filter(pr => pr.title?.toLowerCase().includes(lower)).slice(0, 20) : [],
         serviceConnections: scs.status === "fulfilled" ? scs.value.filter(sc => sc.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
-        wikiPages:         wikis.status === "fulfilled" ? wikis.value.filter(wp => (wp.path || "").toLowerCase().includes(lower) || (wp.name || "").toLowerCase().includes(lower)).slice(0, 20) : [],
+        wikiPages:         wikis.status === "fulfilled" ? wikis.value.slice(0, 20) : [],
       });
     } catch (e) {
       console.error("Search error:", e);
     } finally {
       setSearching(false);
     }
-  }, [client]);
+  }, [client, collections, activeCol]);
 
   // Disconnect
   const handleDisconnect = useCallback(() => {
@@ -623,7 +641,7 @@ export default function App() {
             {/* ── Right column ──────────────────────────────────── */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
               {view === "newCollection" ? (
-                <CollectionBuilder onDone={handleCollectionCreated} />
+                <CollectionBuilder onDone={handleCollectionCreated} client={client} />
               ) : selectedResource ? (
                 <ResourceDetail
                   client={client}
@@ -641,6 +659,7 @@ export default function App() {
                   result={selectedSearchResult}
                   collection={collection}
                   org={org}
+                  client={client}
                   onWorkItemToggle={handleWorkItemToggle}
                   onResourceToggle={handleResourceToggle}
                 />
@@ -653,6 +672,7 @@ export default function App() {
                   onResourceToggle={handleResourceToggle}
                   onAddComment={handleAddComment}
                   onAddCollectionNote={handleAddCollectionNote}
+                  onProjectChange={handleCollectionProjectChange}
                   syncStatus={syncStatus}
                 />
               ) : (
