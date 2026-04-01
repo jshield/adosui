@@ -4,7 +4,7 @@ import { Pill, Dot, Spinner, Input, SelectableRow, ResourceToggle } from "../ui"
 import { FilterPanel } from "./FilterPanel";
 
 export function ResourcePanel({ client, collection, selectedResource, onSelect, onFilterChange, onWorkItemToggle, onResourceToggle }) {
-  const [items, setItems] = useState({ workItems: [], repos: [], pipelines: [], prs: [], serviceConnections: [], wikiPages: [] });
+  const [items, setItems] = useState({ workItems: [], repos: [], pipelines: [], prs: [], serviceConnections: [], wikiPages: [], yamlTools: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -17,6 +17,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
   const prIds = collection.prIds || [];
   const serviceConnectionIds = (collection.serviceConnections || []).map(sc => String(sc.id));
   const wikiPageIds = (collection.wikiPages || []).map(wp => String(wp.id));
+  const yamlToolIds = (collection.yamlTools || []).map(yt => String(yt.id));
 
   useEffect(() => {
     setLoading(true); setError("");
@@ -69,8 +70,11 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
           promises.push(Promise.resolve([]));
         }
 
-        const [wi, repos, pipelines, prs, scs, wikis] = await Promise.all(promises);
-        setItems({ workItems: wi || [], repos: repos || [], pipelines: pipelines || [], prs: prs || [], serviceConnections: scs || [], wikiPages: wikis || [] });
+        // YAML tools are stored directly in the collection
+        promises.push(Promise.resolve(collection.yamlTools || []));
+
+        const [wi, repos, pipelines, prs, scs, wikis, yamlTools] = await Promise.all(promises);
+        setItems({ workItems: wi || [], repos: repos || [], pipelines: pipelines || [], prs: prs || [], serviceConnections: scs || [], wikiPages: wikis || [], yamlTools: yamlTools || [] });
       } catch (e) {
         setError(e.message);
       } finally {
@@ -85,7 +89,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
   }, [filters]);
 
   const hasFilters = filters.types.length > 0 || filters.states.length > 0 || filters.assignee || filters.areaPath;
-  const hasSavedItems = collection.workItemIds?.length > 0 || repoIds.length > 0 || pipelineIds.length > 0 || prIds.length > 0 || serviceConnectionIds.length > 0 || wikiPageIds.length > 0;
+  const hasSavedItems = collection.workItemIds?.length > 0 || repoIds.length > 0 || pipelineIds.length > 0 || prIds.length > 0 || serviceConnectionIds.length > 0 || wikiPageIds.length > 0 || yamlToolIds.length > 0;
 
   const ORDER = { Epic: 0, Feature: 1, "User Story": 2, Bug: 3, Task: 4 };
   const sortedWorkItems = [...items.workItems].sort((a, b) => (ORDER[a.fields?.["System.WorkItemType"]] ?? 5) - (ORDER[b.fields?.["System.WorkItemType"]] ?? 5));
@@ -104,6 +108,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
     { id: "prs", label: "PRs", count: items.prs.length },
     { id: "serviceconnections", label: "Svc Conn.", count: items.serviceConnections.length },
     { id: "wikipages", label: "Wiki", count: items.wikiPages.length },
+    { id: "yamltools", label: "Tools", count: items.yamlTools.length },
   ];
 
   const isSelected = (type, id) => {
@@ -114,6 +119,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
     if (type === "pr") return selectedResource.type === "pr" && String(selectedResource.data.pullRequestId) === String(id);
     if (type === "serviceconnection") return selectedResource.type === "serviceconnection" && String(selectedResource.data.id) === String(id);
     if (type === "wiki") return selectedResource.type === "wiki" && String(selectedResource.data.id) === String(id);
+    if (type === "yamltool") return selectedResource.type === "yamltool" && String(selectedResource.data.id) === String(id);
     return false;
   };
 
@@ -232,6 +238,24 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
      </div>
    );
 
+   const renderYamlTools = () => (
+     <div style={{ flex: 1, overflowY: "auto", paddingBottom: 12 }}>
+       {items.yamlTools.map(yt => {
+         const sel = isSelected("yamltool", yt.id);
+         return (
+           <SelectableRow key={yt.id} sel={sel} selColor={T.amber} onClick={() => onSelect("yamltool", yt)}>
+             <span style={{ fontSize: 12, flexShrink: 0 }}>{yt.icon || "📄"}</span>
+             <span style={{ flex: 1, fontSize: 12, color: sel ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{yt.name || yt.id}</span>
+             <ResourceToggle type="yamltool" item={yt} collection={collection} onResourceToggle={onResourceToggle} />
+           </SelectableRow>
+         );
+       })}
+       {!items.yamlTools.length && !loading && (
+         <div style={{ padding: "40px 16px", textAlign: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>No YAML tools</div>
+       )}
+     </div>
+   );
+
   return (
     <>
       <div style={{ padding: "14px 14px 10px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
@@ -299,6 +323,7 @@ export function ResourcePanel({ client, collection, selectedResource, onSelect, 
         : activeTab === "prs"               ? renderPRs()
         : activeTab === "serviceconnections" ? renderServiceConnections()
         : activeTab === "wikipages"          ? renderWikiPages()
+       : activeTab === "yamltools"          ? renderYamlTools()
         : null
       }
     </>

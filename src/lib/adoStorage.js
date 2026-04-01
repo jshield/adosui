@@ -23,6 +23,9 @@ import yaml from "js-yaml";
 // ── PINNED PIPELINES reserved ID ──────────────────────────────────────────────
 export const PINNED_PIPELINES_ID = "pinned-pipelines";
 
+// ── PINNED TOOLS reserved ID ──────────────────────────────────────────────────
+export const PINNED_TOOLS_ID = "pinned-tools";
+
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
 function sharedPath(collectionId) {
@@ -112,6 +115,17 @@ export function migrateCollection(raw) {
     );
   }
 
+  // Migrate yamlTools
+  if (!Array.isArray(col.yamlTools)) {
+    col.yamlTools = [];
+  } else {
+    col.yamlTools = col.yamlTools.map(yt =>
+      typeof yt === "string"
+        ? { id: yt, name: "", icon: "📄", comments: [] }
+        : { comments: [], ...yt }
+    );
+  }
+
   // Remove legacy flat arrays to keep the YAML clean
   delete col.repoIds;
   delete col.pipelineIds;
@@ -181,6 +195,12 @@ function serialise(collection) {
       wikiName:   wp.wikiName || "",
       project:    wp.project || "",
       comments:   wp.comments || [],
+    })),
+    yamlTools: (collection.yamlTools || []).map(yt => ({
+      id:       String(yt.id),
+      name:     yt.name || "",
+      icon:     yt.icon || "📄",
+      comments: yt.comments || [],
     })),
   };
 }
@@ -350,6 +370,38 @@ export class ADOStorage {
       prIds:    [],
       serviceConnections: [],
       wikiPages: [],
+      yamlTools: [],
+    };
+  }
+
+  // ── Pinned tools personal collection ───────────────────────────────────────
+
+  /**
+   * Return the pinned-tools personal collection, creating a blank one if
+   * it doesn't exist in the loaded collections array.
+   */
+  static getPinnedToolsCollection(collections, profile) {
+    const existing = collections.find(
+      c => c.id === PINNED_TOOLS_ID && c.scope === "personal"
+    );
+    if (existing) return existing;
+    return {
+      id:       PINNED_TOOLS_ID,
+      name:     "Pinned Tools",
+      icon:     "📌",
+      color:    "#F59E0B",
+      scope:    "personal",
+      owner:    profile?.id || null,
+      filters:  { types: [], states: [], assignee: "", areaPath: "" },
+      projects: [],
+      comments: [],
+      workItemIds: [],
+      repos:    [],
+      pipelines: [],
+      prIds:    [],
+      serviceConnections: [],
+      wikiPages: [],
+      yamlTools: [],
     };
   }
 }

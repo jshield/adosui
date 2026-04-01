@@ -107,6 +107,9 @@ export function ResourceDetail({ client, resource, org, collection, profile, onR
   if (type === "wiki") {
     return <WikiPageDetail client={client} wikiPage={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
+  if (type === "yamltool") {
+    return <YamlToolDetail tool={data} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+  }
   return null;
 }
 
@@ -318,10 +321,47 @@ function DeploymentTargetsSection({ client, pipeline, runs }) {
         <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Deployment Targets</div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>
           <Spinner /> Analysing pipeline...
-        </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
+
+// ── YAML Tool Detail ─────────────────────────────────────────────────────────
+
+function YamlToolDetail({ tool, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div style={{ padding: 20, borderBottom: `1px solid ${T.border}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          <span style={{ fontSize: 28 }}>{tool.icon || "📄"}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 22, color: T.heading }}>{tool.name || tool.id}</div>
+            {tool.description && (
+              <div style={{ fontSize: 12, color: T.dim, marginTop: 4 }}>{tool.description}</div>
+            )}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <Pill label={tool.target?.file || "—"} color={T.amber} />
+          {tool.target?.arrayPath && <Pill label={`.${tool.target.arrayPath}`} color={T.dimmer} />}
+        </div>
+        {collection && (
+          <ResourceToggle type="yamltool" item={tool} collection={collection} onResourceToggle={onResourceToggle} size="full" />
+        )}
+      </div>
+      {collection && onAddComment && (
+        <div style={{ padding: 16 }}>
+          <CommentThread
+            comments={(collection.yamlTools || []).find(yt => String(yt.id) === String(tool.id))?.comments || []}
+            onAdd={(text) => onAddComment(collection.id, "yamltool", tool.id, text)}
+            authorName={profile?.displayName || ""}
+            disabled={syncStatus === "saving"}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
   if (error) {
     return (

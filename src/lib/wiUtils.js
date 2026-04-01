@@ -88,6 +88,9 @@ export const isInCollection = (collection, type, id) => {
   if (type === "wiki") {
     return (collection.wikiPages || []).some(wp => String(wp.id) === sid);
   }
+  if (type === "yamltool") {
+    return (collection.yamlTools || []).some(yt => String(yt.id) === sid);
+  }
   return false;
 };
 

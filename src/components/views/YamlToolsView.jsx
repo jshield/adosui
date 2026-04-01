@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import yaml from "js-yaml";
 import { T } from "../../lib/theme";
-import { Btn, Spinner, Card, SelectableRow, EmptyState, SectionLabel } from "../ui";
+import { Btn, Spinner, Card, SelectableRow, EmptyState, SectionLabel, ResourceToggle } from "../ui";
 import { SchemaForm } from "../ui/SchemaForm";
 import { BranchCommitDialog } from "./BranchCommitDialog";
 import {
@@ -32,8 +32,12 @@ import {
  * @param {Array} props.collections - All loaded collections
  * @param {{ id, displayName, emailAddress }} props.profile
  * @param {(msg: string, color?: string) => void} props.showToast
+ * @param {Array} props.pinnedTools - Pinned tools from the personal pinned-tools collection
+ * @param {(tool: object) => void} props.onTogglePinTool - Pin/unpin a tool to the personal collection
+ * @param {(type: string, id: string, colId: string) => void} props.onResourceToggle - Add/remove tool from a collection
+ * @param {string} props.activeColId - Currently active collection ID
  */
-export function YamlToolsView({ client, repoConfig, collections, profile, showToast }) {
+export function YamlToolsView({ client, repoConfig, collections, profile, showToast, pinnedTools = [], onTogglePinTool, onResourceToggle, activeColId }) {
   const [tools, setTools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -353,7 +357,15 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
       {/* Content */}
       <div style={{ flex: 1, overflow: "auto" }}>
         {phase === "tool-select" && (
-          <ToolList tools={tools} onSelect={handleSelectTool} />
+          <ToolList
+            tools={tools}
+            pinnedTools={pinnedTools}
+            onSelect={handleSelectTool}
+            onTogglePin={onTogglePinTool}
+            onResourceToggle={onResourceToggle}
+            activeColId={activeColId}
+            collections={collections}
+          />
         )}
 
         {phase === "item-list" && activeTool && (
@@ -398,7 +410,11 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
-function ToolList({ tools, onSelect }) {
+function ToolList({ tools, pinnedTools, onSelect, onTogglePin, onResourceToggle, activeColId, collections }) {
+  const pinnedIds = new Set((pinnedTools || []).map(t => String(t.id)));
+  const activeCol = collections?.find(c => c.id === activeColId);
+  const unpinnedTools = tools.filter(t => !pinnedIds.has(String(t.id)));
+
   if (tools.length === 0) {
     return (
       <EmptyState icon="🛠️" message="No YAML tools configured">
@@ -412,28 +428,103 @@ function ToolList({ tools, onSelect }) {
 
   return (
     <div>
-      {tools.map(tool => (
-        <SelectableRow key={tool.id} onClick={() => onSelect(tool)} selColor={T.amber}>
-          <span style={{ fontSize: 16, flexShrink: 0 }}>{tool.icon}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{tool.name}</div>
-            {tool.description && (
-              <div style={{ fontSize: 11, color: T.dimmer, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {tool.description}
-              </div>
-            )}
+      {/* Pinned tools section */}
+      {pinnedTools.length > 0 && (
+        <>
+          <div style={{ padding: "8px 14px", fontSize: 10, color: T.amber, background: "rgba(245,158,11,0.05)", borderBottom: `1px solid ${T.border}`, fontWeight: 600, letterSpacing: "0.05em" }}>
+            Pinned ({pinnedTools.length})
           </div>
-          <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-            {tool.target.file}
-            {tool._isMultiFile && (
-              <span style={{ fontSize: 8, color: T.amber, background: `${T.amber}12`, padding: "0px 4px", borderRadius: 2 }}>
-                multi-file
-              </span>
-            )}
-          </span>
-        </SelectableRow>
-      ))}
+          {pinnedTools.map(tool => (
+            <ToolRow
+              key={tool.id}
+              tool={tool}
+              isPinned={true}
+              activeCol={activeCol}
+              onSelect={onSelect}
+              onTogglePin={onTogglePin}
+              onResourceToggle={onResourceToggle}
+            />
+          ))}
+        </>
+      )}
+
+      {/* All tools section */}
+      {unpinnedTools.length > 0 && (
+        <>
+          {pinnedTools.length > 0 && (
+            <div style={{ padding: "8px 14px", fontSize: 10, color: T.dim, borderBottom: `1px solid ${T.border}`, letterSpacing: "0.05em" }}>
+              All Tools ({unpinnedTools.length})
+            </div>
+          )}
+          {unpinnedTools.map(tool => (
+            <ToolRow
+              key={tool.id}
+              tool={tool}
+              isPinned={false}
+              activeCol={activeCol}
+              onSelect={onSelect}
+              onTogglePin={onTogglePin}
+              onResourceToggle={onResourceToggle}
+            />
+          ))}
+        </>
+      )}
     </div>
+  );
+}
+
+function ToolRow({ tool, isPinned, activeCol, onSelect, onTogglePin, onResourceToggle }) {
+  const isInActiveCol = activeCol && Array.isArray(activeCol.yamlTools) && activeCol.yamlTools.some(yt => String(yt.id) === String(tool.id));
+
+  return (
+    <SelectableRow onClick={() => onSelect(tool)} selColor={T.amber}>
+      <span style={{ fontSize: 16, flexShrink: 0 }}>{tool.icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{tool.name}</div>
+        {tool.description && (
+          <div style={{ fontSize: 11, color: T.dimmer, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {tool.description}
+          </div>
+        )}
+      </div>
+      {/* Actions */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        {tool._isMultiFile && (
+          <span style={{ fontSize: 8, color: T.amber, background: `${T.amber}12`, padding: "0px 4px", borderRadius: 2 }}>
+            multi-file
+          </span>
+        )}
+        <span style={{ fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'" }}>
+          {tool.target.file}
+        </span>
+        {/* Pin to personal collection */}
+        {onTogglePin && !tool._isBuiltIn && (
+          <button
+            onClick={e => { e.stopPropagation(); onTogglePin(tool); }}
+            title={isPinned ? "Unpin from Pinned Tools" : "Pin to Pinned Tools"}
+            style={{
+              background: isPinned ? `${T.amber}15` : "none",
+              border: `1px solid ${isPinned ? T.amber + "44" : "transparent"}`,
+              borderRadius: 4, cursor: "pointer", fontSize: 12, padding: "2px 6px",
+              opacity: isPinned ? 1 : 0.4,
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity = 1}
+            onMouseLeave={e => e.currentTarget.style.opacity = isPinned ? 1 : 0.4}
+          >
+            📌
+          </button>
+        )}
+        {/* Add/remove from active collection */}
+        {onResourceToggle && activeCol && !tool._isBuiltIn && (
+          <ResourceToggle
+            type="yamltool"
+            item={tool}
+            collection={activeCol}
+            onResourceToggle={onResourceToggle}
+          />
+        )}
+      </div>
+    </SelectableRow>
   );
 }
 

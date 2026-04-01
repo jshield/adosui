@@ -97,7 +97,7 @@ export function CollectionResources({
   const getPipelineComments = (id) => (collection.pipelines || []).find(p => String(p.id) === String(id))?.comments || [];
   const getServiceConnectionComments = (id) => (collection.serviceConnections || []).find(sc => String(sc.id) === String(id))?.comments || [];
 
-  const empty = workItems.length === 0 && repos.length === 0 && pipelines.length === 0 && prs.length === 0 && serviceConnections.length === 0 && wikiPages.length === 0;
+  const empty = workItems.length === 0 && repos.length === 0 && pipelines.length === 0 && prs.length === 0 && serviceConnections.length === 0 && wikiPages.length === 0 && (collection.yamlTools || []).length === 0;
   const authorName = profile?.displayName || "";
 
   return (
@@ -299,6 +299,35 @@ export function CollectionResources({
                         )}
                       </div>
                       <RemoveBtn type="wiki" id={wp.id} />
+                    </div>
+                  </Card>
+                </div>
+              );
+            }} />
+
+            {/* YAML Tools */}
+            <Group title="YAML Tools" items={collection.yamlTools || []} renderItem={yt => {
+              return (
+                <div key={yt.id} style={{ marginBottom: 8 }}>
+                  <Card>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, padding: "10px 14px" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 14 }}>{yt.icon || "📄"}</span>
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>{yt.name || yt.id}</span>
+                        </div>
+                        {onAddComment && (
+                          <div style={{ marginTop: 8 }}>
+                            <CommentThread
+                              comments={(collection.yamlTools || []).find(ytItem => String(ytItem.id) === String(yt.id))?.comments || []}
+                              onAdd={(text) => onAddComment(collection.id, "yamltool", yt.id, text)}
+                              authorName={authorName}
+                              disabled={syncStatus === "saving"}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <RemoveBtn type="yamltool" id={yt.id} />
                     </div>
                   </Card>
                 </div>

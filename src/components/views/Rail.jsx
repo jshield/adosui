@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { T } from "../../lib/theme";
 import { Dot, UserAvatar, Spinner } from "../ui";
-import { PINNED_PIPELINES_ID } from "../../lib/adoStorage";
+import { PINNED_PIPELINES_ID, PINNED_TOOLS_ID } from "../../lib/adoStorage";
 import { updatePAT as updateStoredPAT } from "../../lib/credentialStore";
 
 const SYNC_LABEL = {
@@ -14,7 +14,7 @@ const SYNC_LABEL = {
 export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, workerActivity, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, onShowWorkerStatus, onShowYamlTools, client, onUpdatePat, onReconfigure }) {
   // Split into shared and personal, hiding the reserved pinned-pipelines collection
   const shared   = collections.filter(c => c.scope !== "personal");
-  const personal = collections.filter(c => c.scope === "personal" && c.id !== PINNED_PIPELINES_ID);
+  const personal = collections.filter(c => c.scope === "personal" && c.id !== PINNED_PIPELINES_ID && c.id !== PINNED_TOOLS_ID);
 
   const syncInfo = SYNC_LABEL[syncStatus] || null;
 

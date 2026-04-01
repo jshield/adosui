@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { T, FONTS } from "./lib/theme";
 import { ADOClient } from "./lib/adoClient";
-import { ADOStorage, PINNED_PIPELINES_ID, ConflictError, migrateCollection } from "./lib/adoStorage";
+import { ADOStorage, PINNED_PIPELINES_ID, PINNED_TOOLS_ID, ConflictError, migrateCollection } from "./lib/adoStorage";
 import { syncCollectionToWiki } from "./lib/wikiSync";
 import {
   ConnectScreen,
@@ -274,7 +274,6 @@ export default function App() {
         const wps = c.wikiPages || [];
         const exists = wps.some(wp => String(wp.id) === rid);
         if (exists) return { ...c, wikiPages: wps.filter(wp => String(wp.id) !== rid) };
-        // Preserve metadata from the wiki item if provided (almsearch results)
         const item = wikiItem;
         return { ...c, wikiPages: [...wps, {
           id:       rid,
@@ -284,6 +283,11 @@ export default function App() {
           project:  item?._projectName || item?.project || "",
           comments: [],
         }] };
+      }
+      if (type === "yamltool") {
+        const yts = c.yamlTools || [];
+        const exists = yts.some(yt => String(yt.id) === rid);
+        return { ...c, yamlTools: exists ? yts.filter(yt => String(yt.id) !== rid) : [...yts, { id: rid, name: wikiItem?.name || "", icon: wikiItem?.icon || "📄", comments: [] }] };
       }
       return c;
     });
@@ -335,6 +339,16 @@ export default function App() {
             String(wp.id) === String(resourceId)
               ? { ...wp, comments: [...(wp.comments || []), comment] }
               : wp
+          ),
+        };
+      }
+      if (resourceType === "yamltool") {
+        return {
+          ...c,
+          yamlTools: (c.yamlTools || []).map(yt =>
+            String(yt.id) === String(resourceId)
+              ? { ...yt, comments: [...(yt.comments || []), comment] }
+              : yt
           ),
         };
       }
@@ -422,6 +436,47 @@ export default function App() {
       };
     });
   }, [collections, pinnedCollection, updateCollection]);
+
+  // Pinned tools personal collection
+  const pinnedToolsCollection = ADOStorage.getPinnedToolsCollection(collections, profile);
+
+  const handleTogglePinTool = useCallback((tool) => {
+    const existing = collections.find(c => c.id === PINNED_TOOLS_ID && c.scope === "personal");
+    const colId = PINNED_TOOLS_ID;
+    const tid = String(tool.id);
+
+    if (!existing) {
+      const newCol = {
+        ...pinnedToolsCollection,
+        yamlTools: [{
+          id:       tid,
+          name:     tool.name || "",
+          icon:     tool.icon || "📄",
+          comments: [],
+        }],
+      };
+      setCollections(p => [...p, newCol]);
+      pendingSaves.current.add(colId);
+      return;
+    }
+
+    updateCollection(colId, c => {
+      const yts = c.yamlTools || [];
+      const exists = yts.some(yt => String(yt.id) === tid);
+      if (exists) {
+        return { ...c, yamlTools: yts.filter(yt => String(yt.id) !== tid) };
+      }
+      return {
+        ...c,
+        yamlTools: [...yts, {
+          id:       tid,
+          name:     tool.name || "",
+          icon:     tool.icon || "📄",
+          comments: [],
+        }],
+      };
+    });
+  }, [collections, pinnedToolsCollection, updateCollection]);
 
   // Global search
   const handleSearch = useCallback(async (q) => {
@@ -665,6 +720,10 @@ export default function App() {
               collections={collections}
               profile={profile}
               showToast={showToast}
+              pinnedTools={pinnedToolsCollection?.yamlTools || []}
+              onTogglePinTool={handleTogglePinTool}
+              onResourceToggle={handleResourceToggle}
+              activeColId={activeCol}
             />
           </div>
         ) : (
