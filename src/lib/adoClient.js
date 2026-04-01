@@ -299,6 +299,31 @@ export class ADOClient {
     return r.value || [];
   }
 
+  /**
+   * Create a pull request in a Git repo.
+   * @param {string} project
+   * @param {string} repoId
+   * @param {string} title  PR title
+   * @param {string} description  PR description
+   * @param {string} sourceBranch  Source branch name (without refs/heads/)
+   * @param {string} [targetBranch="main"]  Target branch name
+   * @returns {Promise<object>} The created PR object (includes url, pullRequestId)
+   */
+  async createPullRequest(project, repoId, title, description, sourceBranch, targetBranch = "main") {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/pullrequests?api-version=7.1`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          sourceRefName: `refs/heads/${sourceBranch}`,
+          targetRefName: `refs/heads/${targetBranch}`,
+          title,
+          description,
+        }),
+      }
+    );
+  }
+
   async getTestRuns(project) {
     try {
       const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/test/runs?api-version=7.1&$top=20&includeRunDetails=true`);
@@ -381,6 +406,38 @@ export class ADOClient {
   }
 
   /**
+   * Create a new branch in a Git repo from a source branch.
+   * @param {string} project
+   * @param {string} repoId
+   * @param {string} newBranch  Branch name (without refs/heads/ prefix)
+   * @param {string} [sourceBranch="main"]  Source branch to branch from
+   * @returns {Promise<object>} The created ref
+   */
+  async createBranch(project, repoId, newBranch, sourceBranch = "main") {
+    // Get the source branch HEAD OID
+    const refsResp = await this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}` +
+      `/refs?filter=heads/${encodeURIComponent(sourceBranch)}&api-version=7.1`
+    );
+    const refs = refsResp.value || [];
+    const sourceRef = refs.find(r => r.name === `refs/heads/${sourceBranch}`) || refs[0];
+    if (!sourceRef) throw new Error(`Source branch "${sourceBranch}" not found`);
+
+    // Create the new branch ref pointing to the same commit
+    const r = await this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/refs?api-version=7.1`,
+      {
+        method: "POST",
+        body: JSON.stringify([{
+          name: `refs/heads/${newBranch}`,
+          oldObjectId: sourceRef.objectId,
+        }]),
+      }
+    );
+    return r;
+  }
+
+  /**
    * List items (files/directories) at a given path in a Git repo.
    * Returns an array of item objects with path, objectId, isFolder, etc.
    */
@@ -388,6 +445,24 @@ export class ADOClient {
     try {
       let url = `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/items` +
         `?scopePath=${encodeURIComponent(path)}&recursionLevel=OneLevel&api-version=7.1`;
+      if (branch && branch !== "main") {
+        url += `&versionDescriptor.version=${encodeURIComponent(branch)}&versionDescriptor.versionType=branch`;
+      }
+      const r = await this._fetch(url);
+      return r.value || [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * List all items recursively under a path in a Git repo.
+   * Returns an array of item objects with path, objectId, isFolder, etc.
+   */
+  async listGitItemsRecursive(project, repoId, path = "/", branch = "main") {
+    try {
+      let url = `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/items` +
+        `?scopePath=${encodeURIComponent(path)}&recursionLevel=Full&api-version=7.1`;
       if (branch && branch !== "main") {
         url += `&versionDescriptor.version=${encodeURIComponent(branch)}&versionDescriptor.versionType=branch`;
       }

@@ -12,3 +12,4 @@ export { SearchResultsList }                   from "./SearchResultsList";
 export { AppHeader }                           from "./AppHeader";
 export { Rail }                                from "./Rail";
 export { WorkerStatusView }                    from "./WorkerStatusView";
+export { YamlToolsView }                      from "./YamlToolsView";

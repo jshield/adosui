@@ -11,7 +11,7 @@ const SYNC_LABEL = {
   error:  { text: "Save failed", color: T.red },
 };
 
-export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, workerActivity, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, onShowWorkerStatus, client, onUpdatePat, onReconfigure }) {
+export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, workerActivity, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, onShowWorkerStatus, onShowYamlTools, client, onUpdatePat, onReconfigure }) {
   // Split into shared and personal, hiding the reserved pinned-pipelines collection
   const shared   = collections.filter(c => c.scope !== "personal");
   const personal = collections.filter(c => c.scope === "personal" && c.id !== PINNED_PIPELINES_ID);
@@ -104,6 +104,17 @@ export function Rail({ profile, org, collections, activeCol, activeView, syncSta
       >
         <span style={{ fontSize: 12 }}>◉</span>
         <span style={{ fontSize: 12, color: activeView === "workerStatus" ? T.cyan : T.muted, fontWeight: 500 }}>Sync Status</span>
+      </div>
+
+      {/* YAML Tools shortcut */}
+      <div
+        onClick={onShowYamlTools}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer", background: activeView === "yamlTools" ? `${T.amber}10` : "transparent", borderLeft: `2px solid ${activeView === "yamlTools" ? T.amber : "transparent"}`, transition: "all 0.12s", borderBottom: `1px solid ${T.border}` }}
+        onMouseEnter={e => { if (activeView !== "yamlTools") e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+        onMouseLeave={e => { if (activeView !== "yamlTools") e.currentTarget.style.background = "transparent"; }}
+      >
+        <span style={{ fontSize: 13 }}>🛠️</span>
+        <span style={{ fontSize: 12, color: activeView === "yamlTools" ? T.amber : T.muted, fontWeight: 500 }}>YAML Tools</span>
       </div>
 
       {/* Collections list */}

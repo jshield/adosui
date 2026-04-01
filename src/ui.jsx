@@ -15,6 +15,7 @@ import {
   AppHeader,
   Rail,
   WorkerStatusView,
+  YamlToolsView,
 } from "./components/views";
 import { hasStoredCredentials, clearCredentials, loadPAT, clearSessionKey } from "./lib/credentialStore";
 import backgroundWorker from "./lib/backgroundWorker";
@@ -631,6 +632,7 @@ export default function App() {
           onDisconnect={handleDisconnect}
           onShowPipelines={() => setView("pipelines")}
           onShowWorkerStatus={() => setView("workerStatus")}
+          onShowYamlTools={() => setView("yamlTools")}
           client={client}
           onUpdatePat={handleUpdatePat}
           onReconfigure={handleReconfigure}
@@ -653,6 +655,16 @@ export default function App() {
               onAddComment={handleAddComment}
               onSaveLogComments={handleSaveLogComments}
               syncStatus={syncStatus}
+            />
+          </div>
+        ) : view === "yamlTools" ? (
+          <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+            <YamlToolsView
+              client={client}
+              repoConfig={repoConfig}
+              collections={collections}
+              profile={profile}
+              showToast={showToast}
             />
           </div>
         ) : (

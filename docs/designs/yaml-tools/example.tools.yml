@@ -1,0 +1,85 @@
+# Example .superui/tools.yml
+#
+# Place this file at the root of any Azure DevOps Git repository.
+# When the repo is referenced in a collection, superui will discover
+# this file and expose the defined tools in the YAML Tools view.
+
+tools:
+  # ── Example 1: Inline field definitions ──────────────────────
+  - id: deploy-targets
+    name: Deploy Targets
+    description: Manage deployment target configurations
+    icon: "🚀"
+    target:
+      file: config/deploy-targets.yaml
+      arrayPath: targets
+    schema:
+      fields:
+        - key: name
+          label: Target Name
+          type: string
+          required: true
+          description: Unique name for this deployment target
+        - key: environment
+          label: Environment
+          type: select
+          options: [dev, staging, prod]
+          required: true
+        - key: url
+          label: Endpoint URL
+          type: string
+          description: The base URL for this target
+        - key: replicas
+          label: Replicas
+          type: number
+          default: 1
+        - key: enabled
+          label: Enabled
+          type: boolean
+          default: true
+        - key: tags
+          label: Tags
+          type: tags
+          description: Comma-separated tags for categorization
+    branch:
+      prefix: yaml-tool/
+    commitMessageTemplate: "Add {field:name} to {tool:name}"
+
+  # ── Example 2: External JSON Schema reference ───────────────
+  - id: feature-flags
+    name: Feature Flags
+    description: Manage feature flag configurations
+    icon: "🎯"
+    target:
+      file: config/feature-flags.yaml
+      arrayPath: flags
+    schema:
+      ref: schemas/feature-flags.json
+    branch:
+      prefix: yaml-tool/
+
+  # ── Example 3: Simple flat config ───────────────────────────
+  - id: environment-vars
+    name: Environment Variables
+    description: Manage shared environment variables
+    icon: "🔧"
+    target:
+      file: config/env.yaml
+      arrayPath: variables
+    schema:
+      fields:
+        - key: key
+          label: Variable Name
+          type: string
+          required: true
+        - key: value
+          label: Value
+          type: string
+          required: true
+        - key: secret
+          label: Is Secret
+          type: boolean
+          default: false
+    branch:
+      prefix: config/env/
+    commitMessageTemplate: "Add env var {field:key}"
