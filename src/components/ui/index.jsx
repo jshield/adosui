@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { isInCollection } from "../../lib";
 
@@ -278,6 +279,74 @@ export const popoverStyle = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
   zIndex: 100,
 };
+
+/* ── Project scope selector ──────────────────────────────────── */
+export function ProjectScopeSelector({ client, selectedProjects, onChange, toggleLabel }) {
+  const [show, setShow] = useState(false);
+  const [available, setAvailable] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!show || !client) return;
+    setLoading(true);
+    client.getProjects()
+      .then(ps => setAvailable(ps.map(p => p.name).sort()))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [show, client]);
+
+  const toggle = (name) => {
+    const next = selectedProjects.includes(name)
+      ? selectedProjects.filter(p => p !== name)
+      : [...selectedProjects, name];
+    onChange(next);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+        <label style={formLabelStyle}>Projects</label>
+        <button onClick={() => setShow(!show)}
+          style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono'", padding: 0 }}>
+          {show ? "▲ done" : `▼ ${toggleLabel || "scope"}`}
+        </button>
+      </div>
+      {selectedProjects.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+          {selectedProjects.map(p => (
+            <span key={p} onClick={() => toggle(p)}
+              style={{ fontSize: 10, fontFamily: "'JetBrains Mono'", background: `${T.cyan}18`, border: `1px solid ${T.cyan}44`, color: T.cyan, borderRadius: 3, padding: "2px 7px", cursor: "pointer" }}>
+              {p} ×
+            </span>
+          ))}
+        </div>
+      )}
+      {show && (
+        <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, padding: 4 }}>
+          {loading ? (
+            <div style={{ padding: 12, textAlign: "center" }}><Spinner size={14} /></div>
+          ) : available.length === 0 ? (
+            <div style={{ padding: 12, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>No projects found</div>
+          ) : (
+            available.map(p => {
+              const sel = selectedProjects.includes(p);
+              return (
+                <div key={p} onClick={() => toggle(p)}
+                  style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", borderRadius: 4, cursor: "pointer", background: sel ? `${T.cyan}12` : "transparent" }}>
+                  <span style={{ fontSize: 11, color: sel ? T.cyan : T.dim, width: 14 }}>{sel ? "✓" : ""}</span>
+                  <span style={{ fontSize: 12, color: sel ? T.text : T.muted }}>{p}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+      <div style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", marginTop: 4 }}>
+        {selectedProjects.length ? `Scoped to ${selectedProjects.length} project${selectedProjects.length > 1 ? "s" : ""}` : "All projects (unscoped)"}
+      </div>
+    </div>
+  );
+}
 
 /* ── Comment thread ───────────────────────────────────────────── */
 export { CommentThread } from "./CommentThread";

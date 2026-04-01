@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
-import { Pill, Dot, Card, Spinner, CommentThread, Spinner as SpinnerUI } from "../ui";
+import { Pill, Dot, Card, Spinner, CommentThread, ProjectScopeSelector } from "../ui";
 import { WI_TYPE_COLOR, WI_TYPE_SHORT, stateColor, pipelineStatus, prStatus, branchName, getLatestRun, getRunBranch, getRunStatusVal, cache } from "../../lib";
 
 export function CollectionResources({
@@ -21,9 +21,6 @@ export function CollectionResources({
   const [serviceConnections, setServiceConnections] = useState([]);
   const [wikiPages, setWikiPages] = useState([]);
   const [loading,    setLoading]    = useState(true);
-  const [showProjects, setShowProjects] = useState(false);
-  const [availableProjects, setAvailableProjects] = useState([]);
-  const [loadingProjects, setLoadingProjects] = useState(false);
 
   // Derive the repo/pipeline/service connection IDs from the structured objects
   const repoIds     = (collection.repos     || []).map(r => r.id);
@@ -74,23 +71,6 @@ export function CollectionResources({
   const removeItem = (type, id) => {
     if (type === "workitem") onWorkItemToggle(collection.id, id);
     else onResourceToggle(type, id, collection.id);
-  };
-
-  useEffect(() => {
-    if (!showProjects || !client) return;
-    setLoadingProjects(true);
-    client.getProjects()
-      .then(ps => setAvailableProjects(ps.map(p => p.name).sort()))
-      .catch(() => {})
-      .finally(() => setLoadingProjects(false));
-  }, [showProjects, client]);
-
-  const toggleProjectScope = (projName) => {
-    const current = collection.projects || [];
-    const next = current.includes(projName)
-      ? current.filter(p => p !== projName)
-      : [...current, projName];
-    if (onProjectChange) onProjectChange(collection.id, next);
   };
 
   const RemoveBtn = ({ type, id }) => (
@@ -154,50 +134,12 @@ export function CollectionResources({
         {/* Project scope editor */}
         {onProjectChange && (
           <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                Project Scope
-              </span>
-              <button
-                onClick={() => setShowProjects(!showProjects)}
-                style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", fontSize: 11, fontFamily: "'JetBrains Mono'", padding: 0 }}
-              >
-                {showProjects ? "▲ done" : "▼ edit"}
-              </button>
-            </div>
-            <div style={{ fontSize: 11, color: collection.projects?.length ? T.cyan : T.dim, fontFamily: "'JetBrains Mono'" }}>
-              {collection.projects?.length
-                ? `Scoped to ${collection.projects.length} project${collection.projects.length > 1 ? "s" : ""}`
-                : "All projects (unscoped)"}
-            </div>
-            {collection.projects?.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-                {collection.projects.map(p => (
-                  <span key={p} onClick={() => toggleProjectScope(p)}
-                    style={{ fontSize: 10, fontFamily: "'JetBrains Mono'", background: `${T.cyan}18`, border: `1px solid ${T.cyan}44`, color: T.cyan, borderRadius: 3, padding: "2px 7px", cursor: "pointer" }}>
-                    {p} ×
-                  </span>
-                ))}
-              </div>
-            )}
-            {showProjects && (
-              <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, padding: 4, marginTop: 8 }}>
-                {loadingProjects ? (
-                  <div style={{ padding: 12, textAlign: "center" }}><Spinner size={14} /></div>
-                ) : (
-                  availableProjects.map(p => {
-                    const sel = (collection.projects || []).includes(p);
-                    return (
-                      <div key={p} onClick={() => toggleProjectScope(p)}
-                        style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 8px", borderRadius: 4, cursor: "pointer", background: sel ? `${T.cyan}12` : "transparent" }}>
-                        <span style={{ fontSize: 11, color: sel ? T.cyan : T.dim, width: 14 }}>{sel ? "✓" : ""}</span>
-                        <span style={{ fontSize: 12, color: sel ? T.text : T.muted }}>{p}</span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
+            <ProjectScopeSelector
+              client={client}
+              selectedProjects={collection.projects || []}
+              onChange={(projects) => onProjectChange(collection.id, projects)}
+              toggleLabel="edit"
+            />
           </div>
         )}
       </div>

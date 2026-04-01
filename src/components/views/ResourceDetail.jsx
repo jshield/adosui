@@ -403,22 +403,6 @@ function PipelineDetail({ client, pipeline, org, collection, profile, onResource
       .finally(() => setRunsLoading(false));
   }, [pipeline, client]);
 
-  // Prefer cached run helpers when available; fall back to local extraction.
-  // We intentionally avoid importing wiUtils here to keep this file self-contained
-  // but use a resilient branch extraction when a run object is available.
-  const getRunBranch = (run) => {
-    if (!run) return "unknown";
-    return (
-      branchName(run.sourceBranch) ||
-      branchName(run.sourceRefName) ||
-      branchName(run.triggerInfo?.sourceBranch) ||
-      branchName(run.triggerInfo?.prSourceBranch) ||
-      branchName(run.resources?.repositories?.self?.refName) ||
-      branchName(run.repository?.defaultBranch) ||
-      "unknown"
-    );
-  };
-
   const runsByBranch = getLatestPerBranch(runs || []);
 
   return (

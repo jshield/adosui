@@ -115,7 +115,15 @@ export const getLatestRun = (val) => {
 export const getRunBranch = (run) => {
   if (!run) return "";
   return branchName(
-    run.sourceBranch || run.sourceRefName || run.repository?.refName || run.repository?.branch || run.resources?.repositories?.self?.refName || ""
+    run.sourceBranch ||
+    run.sourceRefName ||
+    run.triggerInfo?.sourceBranch ||
+    run.triggerInfo?.prSourceBranch ||
+    run.resources?.repositories?.self?.refName ||
+    run.repository?.refName ||
+    run.repository?.branch ||
+    run.repository?.defaultBranch ||
+    ""
   );
 };
 

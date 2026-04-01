@@ -7,7 +7,6 @@ import {
   ConnectScreen,
   SetupScreen,
   CollectionBuilder,
-  WorkItemPanel,
   ResourcePanel,
   ResourceDetail,
   CollectionResources,

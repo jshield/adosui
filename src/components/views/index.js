@@ -4,7 +4,6 @@ export { FilterPanel, ALL_TYPES, ALL_STATES } from "./FilterPanel";
 export { ConnectScreen }                      from "./ConnectScreen";
 export { SetupScreen }                        from "./SetupScreen";
 export { CollectionBuilder }                  from "./CollectionBuilder";
-export { WorkItemPanel }                       from "./WorkItemPanel";
 export { ResourcePanel }                       from "./ResourcePanel";
 export { CollectionDropdown }                 from "./CollectionDropdown";
 export { ResourceDetail }                      from "./ResourceDetail";

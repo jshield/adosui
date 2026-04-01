@@ -1,18 +1,7 @@
 import React, { useState } from "react";
 import { T } from "../../lib/theme";
+import { timeAgo } from "../../lib";
 import { getCommentLineRange } from "../../lib/commentUtils";
-
-function timeAgo(dateStr) {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
 
 function CommentItem({ comment, onResolve, onDelete, onClick }) {
   return (
