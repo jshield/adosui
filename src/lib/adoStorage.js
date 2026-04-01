@@ -190,7 +190,7 @@ function serialise(collection) {
 export class ADOStorage {
   /**
    * @param {import('./adoClient').ADOClient} client
-   * @param {{ project: string, repoId: string, repoName: string, wikiId?: string }} config
+   * @param {{ project: string, repoId: string, repoName: string, branch?: string, wikiId?: string }} config
    * @param {{ id: string, displayName: string, emailAddress: string }} profile
    */
   constructor(client, config, profile) {
@@ -201,6 +201,7 @@ export class ADOStorage {
 
   get _project()  { return this.config.project; }
   get _repoId()   { return this.config.repoId; }
+  get _branch()   { return this.config.branch || "main"; }
 
 
   // ── Read ────────────────────────────────────────────────────────────────────
@@ -222,7 +223,7 @@ export class ADOStorage {
   }
 
   async _loadFromFolder(folderPath) {
-    const items = await this.client.listGitItems(this._project, this._repoId, folderPath);
+    const items = await this.client.listGitItems(this._project, this._repoId, folderPath, this._branch);
     const yamlFiles = items.filter(i => !i.isFolder && i.path?.endsWith(".yaml"));
 
     const results = await Promise.allSettled(
@@ -235,7 +236,7 @@ export class ADOStorage {
   }
 
   async _readFile(filePath) {
-    const file = await this.client.readGitFile(this._project, this._repoId, filePath);
+    const file = await this.client.readGitFile(this._project, this._repoId, filePath, this._branch);
     if (!file) return null;
     try {
       const raw = yaml.load(file.content);
@@ -265,7 +266,7 @@ export class ADOStorage {
 
     // Skip push if content hasn't changed
     try {
-      const existing = await this.client.readGitFile(this._project, this._repoId, path);
+      const existing = await this.client.readGitFile(this._project, this._repoId, path, this._branch);
       if (existing?.content === content) {
         console.debug(`[adoStorage] No changes to "${collection.name}", skipping push`);
         return existing.objectId || null;
@@ -281,7 +282,10 @@ export class ADOStorage {
         path,
         content,
         collection._objectId || null,
-        msg
+        msg,
+        undefined,
+        undefined,
+        this._branch
       );
     } catch (e) {
       if (e.message?.includes("non-fast-forward") || e.message?.includes("409")) {
@@ -293,7 +297,7 @@ export class ADOStorage {
     // Re-read the file to get the fresh objectId for optimistic locking on the
     // next save, so we don't need to probe again.
     try {
-      const refreshed = await this.client.readGitFile(this._project, this._repoId, path);
+      const refreshed = await this.client.readGitFile(this._project, this._repoId, path, this._branch);
       return refreshed?.objectId || null;
     } catch {
       return null;
@@ -312,7 +316,10 @@ export class ADOStorage {
       path,
       null,          // null content = delete
       collection._objectId || null,
-      msg
+      msg,
+      undefined,
+      undefined,
+      this._branch
     );
   }
 

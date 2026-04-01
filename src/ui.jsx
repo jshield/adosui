@@ -504,6 +504,15 @@ export default function App() {
     showToast("PAT updated successfully", T.green);
   }, [showToast]);
 
+  // Reconfigure config repo settings
+  const handleReconfigure = useCallback(() => {
+    setAppPhase("setup");
+  }, []);
+
+  const handleReconfigureCancel = useCallback(() => {
+    setAppPhase("app");
+  }, []);
+
   // Auto-resume session on mount if credentials exist
   useEffect(() => {
     // If we already have a client, don't auto-resume
@@ -561,7 +570,8 @@ export default function App() {
     client={client}
     org={org}
     onSetupComplete={handleSetupComplete}
-    onBack={handleDisconnect}
+    onBack={repoConfig ? handleReconfigureCancel : handleDisconnect}
+    initialConfig={repoConfig || undefined}
   />;
 
   /* ── Render: App ──────────────────────────────────────────────── */
@@ -617,6 +627,7 @@ export default function App() {
           onShowPipelines={() => setView("pipelines")}
           client={client}
           onUpdatePat={handleUpdatePat}
+          onReconfigure={handleReconfigure}
         />
 
         {/* ── Pipelines full-width view ────────────────────────── */}

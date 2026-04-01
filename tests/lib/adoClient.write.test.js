@@ -57,6 +57,28 @@ describe('adoClient write operations', () => {
     });
   });
 
+  describe('listBranches', () => {
+    it('should exist on client', () => {
+      expect(typeof client.listBranches).toBe('function');
+    });
+
+    it('should return branch names from refs API', async () => {
+      mockSuccess({ value: [
+        { name: 'refs/heads/main', objectId: 'abc' },
+        { name: 'refs/heads/develop', objectId: 'def' },
+      ]});
+
+      const branches = await client.listBranches('proj', 'repo');
+      expect(branches).toEqual(['main', 'develop']);
+    });
+
+    it('should return empty array on error', async () => {
+      fetchMock.mockRejectedValue(new Error('network error'));
+      const branches = await client.listBranches('proj', 'repo');
+      expect(branches).toEqual([]);
+    });
+  });
+
   describe('getWikiPagesForProject', () => {
     it('should exist on client', () => {
       expect(typeof client.getWikiPagesForProject).toBe('function');

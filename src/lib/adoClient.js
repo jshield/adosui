@@ -365,15 +365,33 @@ export class ADOClient {
   }
 
   /**
+   * List branches in a Git repo.
+   * Returns an array of branch names (e.g. ["main", "develop"]).
+   */
+  async listBranches(project, repoId) {
+    try {
+      const r = await this._fetch(
+        `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}` +
+        `/refs?filter=heads/&api-version=7.1`
+      );
+      return (r.value || []).map(ref => ref.name?.replace("refs/heads/", "")).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * List items (files/directories) at a given path in a Git repo.
    * Returns an array of item objects with path, objectId, isFolder, etc.
    */
-  async listGitItems(project, repoId, path = "/") {
+  async listGitItems(project, repoId, path = "/", branch = "main") {
     try {
-      const r = await this._fetch(
-        `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/items` +
-        `?scopePath=${encodeURIComponent(path)}&recursionLevel=OneLevel&api-version=7.1`
-      );
+      let url = `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/items` +
+        `?scopePath=${encodeURIComponent(path)}&recursionLevel=OneLevel&api-version=7.1`;
+      if (branch && branch !== "main") {
+        url += `&versionDescriptor.version=${encodeURIComponent(branch)}&versionDescriptor.versionType=branch`;
+      }
+      const r = await this._fetch(url);
       return r.value || [];
     } catch {
       return [];
@@ -384,12 +402,14 @@ export class ADOClient {
    * Read the content of a single file from a Git repo.
    * Returns { content: string, objectId: string } or null if not found.
    */
-  async readGitFile(project, repoId, filePath) {
+  async readGitFile(project, repoId, filePath, branch = "main") {
     try {
-      const r = await this._fetch(
-        `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/items` +
-        `?path=${encodeURIComponent(filePath)}&includeContent=true&api-version=7.1`
-      );
+      let url = `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}/items` +
+        `?path=${encodeURIComponent(filePath)}&includeContent=true&api-version=7.1`;
+      if (branch && branch !== "main") {
+        url += `&versionDescriptor.version=${encodeURIComponent(branch)}&versionDescriptor.versionType=branch`;
+      }
+      const r = await this._fetch(url);
       // The items API returns the file content in r.content when includeContent=true
       return { content: r.content || "", objectId: r.objectId || null };
     } catch {
@@ -408,26 +428,27 @@ export class ADOClient {
    * @param {string} commitMessage
    * @param {string} authorName
    * @param {string} authorEmail
+   * @param {string} [branch="main"]  Branch name to push to
    * @returns {Promise<object>} The push response from ADO
    */
-  async pushGitFile(project, repoId, filePath, content, oldObjectId, commitMessage, authorName, authorEmail) {
+  async pushGitFile(project, repoId, filePath, content, oldObjectId, commitMessage, authorName, authorEmail, branch = "main") {
     // Determine the branch's latest commit so we can push on top of it
     const refsResp = await this._fetch(
       `${this.base}/${encodeURIComponent(project)}/_apis/git/repositories/${repoId}` +
-      `/refs?filter=heads/main&api-version=7.1`
+      `/refs?filter=heads/${encodeURIComponent(branch)}&api-version=7.1`
     );
     const refs = refsResp.value || [];
-    const mainRef = refs.find(r => r.name === "refs/heads/main") || refs[0];
+    const branchRef = refs.find(r => r.name === `refs/heads/${branch}`) || refs[0];
 
     // For brand-new repos the branch may not exist yet — use the null OID
-    const oldRefObjectId = mainRef ? mainRef.objectId : "0000000000000000000000000000000000000000";
+    const oldRefObjectId = branchRef ? branchRef.objectId : "0000000000000000000000000000000000000000";
 
     // When no oldObjectId is supplied (new collection created in the browser),
     // probe whether the file already exists so we use "edit" rather than "add"
     // if a previous session already wrote it.
     let resolvedOldObjectId = oldObjectId;
     if (content !== null && !resolvedOldObjectId) {
-      const existing = await this.readGitFile(project, repoId, filePath);
+      const existing = await this.readGitFile(project, repoId, filePath, branch);
       if (existing?.objectId) resolvedOldObjectId = existing.objectId;
     }
 
@@ -440,7 +461,7 @@ export class ADOClient {
 
     const now = new Date().toISOString();
     const pushPayload = {
-      refUpdates: [{ name: "refs/heads/main", oldObjectId: oldRefObjectId }],
+      refUpdates: [{ name: `refs/heads/${branch}`, oldObjectId: oldRefObjectId }],
       commits: [{
         comment: commitMessage,
         author: { name: authorName, email: authorEmail, date: now },

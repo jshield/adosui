@@ -26,7 +26,7 @@ describe('ADOStorage methods exist', () => {
     const { ADOStorage } = await import('../../src/lib/adoStorage.js');
     const storage = new ADOStorage(
       clientMock,
-      { project: 'P', repoId: 'r', repoName: 'n' },
+      { project: 'P', repoId: 'r', repoName: 'n', branch: 'main' },
       { id: 'u1', displayName: 'User' }
     );
     expect(typeof storage.save).toBe('function');

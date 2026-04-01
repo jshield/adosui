@@ -1,20 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { T, FONTS } from "../../lib/theme";
 import { Spinner, Btn, Input, formLabelStyle } from "../ui";
 
 /**
  * SetupScreen
  *
- * Shown once after successful authentication when no config-repo pointer
- * exists in localStorage. The user picks:
+ * Shown after successful authentication when no config-repo pointer
+ * exists in localStorage, or when the user wants to reconfigure.
+ * The user picks:
  *   1. ADO project
  *   2. Config repo (existing or new, with a name input)
- *   3. Wiki (optional)
+ *   3. Branch
+ *   4. Wiki (optional)
  *
- * On confirm, calls onSetupComplete with:
- *   { project, repoId, repoName, wikiId, wikiProject }
+ * @param {object} props
+ * @param {object}   props.client         ADOClient instance
+ * @param {string}   props.org            Organisation name
+ * @param {Function} props.onSetupComplete  Called with { project, repoId, repoName, branch, wikiId, wikiProject }
+ * @param {Function} props.onBack          Back / cancel
+ * @param {object}   [props.initialConfig] Existing config to pre-populate (reconfiguration mode)
  */
-export function SetupScreen({ client, org, onSetupComplete, onBack }) {
+export function SetupScreen({ client, org, onSetupComplete, onBack, initialConfig }) {
   const [projects,  setProjects]  = useState([]);
   const [project,   setProject]   = useState("");
 
@@ -22,6 +28,10 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
   const [repoMode,  setRepoMode]  = useState("existing"); // "existing" | "create"
   const [repoId,    setRepoId]    = useState("");
   const [newRepoName, setNewRepoName] = useState("superui-config");
+
+  const [branches,       setBranches]       = useState([]);
+  const [branch,         setBranch]         = useState("");
+  const [loadingBranches, setLoadingBranches] = useState(false);
 
   const [wikis,     setWikis]     = useState([]);
   const [wikiId,    setWikiId]    = useState("");
@@ -33,51 +43,119 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
   const [saving,          setSaving]          = useState(false);
   const [error,           setError]           = useState("");
 
+  // Track whether we've applied initialConfig values after repos loaded
+  const initialDone = useRef(false);
+
   // Load projects on mount
   useEffect(() => {
     client.getProjects().then(ps => {
       setProjects(ps);
-      if (ps.length > 0) setProject(ps[0].name);
+      if (initialConfig?.project) {
+        setProject(initialConfig.project);
+      } else if (ps.length > 0) {
+        setProject(ps[0].name);
+      }
     }).catch(() => {}).finally(() => setLoadingProjects(false));
-  }, [client]);
+  }, [client, initialConfig]);
 
   // Load repos and wikis whenever project changes
   useEffect(() => {
     if (!project) return;
     setLoadingRepos(true);
     setRepos([]);
-    setRepoId("");
+    setBranches([]);
+    setBranch("");
+
+    if (!initialConfig || initialDone.current) {
+      setRepoId("");
+      setRepoMode("existing");
+    }
+
     client.listReposInProject(project)
       .then(rs => {
         setRepos(rs);
-        // Pre-select "superui-config" if it exists, otherwise switch to create mode
-        const existing = rs.find(r => r.name.toLowerCase() === "superui-config");
-        if (existing) {
+        if (initialConfig && !initialDone.current) {
+          initialDone.current = true;
           setRepoMode("existing");
-          setRepoId(existing.id);
-        } else {
-          setRepoMode("create");
-          setRepoId("");
+          setRepoId(initialConfig.repoId || "");
+          setBranch(initialConfig.branch || "main");
+        } else if (!initialConfig) {
+          const existing = rs.find(r => r.name.toLowerCase() === "superui-config");
+          if (existing) {
+            setRepoMode("existing");
+            setRepoId(existing.id);
+          } else {
+            setRepoMode("create");
+            setRepoId("");
+          }
         }
       })
       .catch(() => {})
       .finally(() => setLoadingRepos(false));
 
+    if (!initialConfig || initialDone.current) {
+      setLoadingWikis(true);
+      setWikis([]);
+      setWikiId("");
+      setWikiSkip(false);
+      client.listWikis(project)
+        .then(ws => {
+          setWikis(ws);
+          if (ws.length > 0) setWikiId(ws[0].id);
+          else setWikiSkip(true);
+        })
+        .catch(() => setWikiSkip(true))
+        .finally(() => setLoadingWikis(false));
+    }
+  }, [project, client, initialConfig]);
+
+  // Load wikis after initial config is applied (first time only)
+  useEffect(() => {
+    if (!initialConfig || !initialDone.current || !project) return;
+    if (wikis.length > 0 || loadingWikis) return;
     setLoadingWikis(true);
-    setWikis([]);
-    setWikiId("");
     client.listWikis(project)
       .then(ws => {
         setWikis(ws);
-        if (ws.length > 0) setWikiId(ws[0].id);
-        else setWikiSkip(true);
+        if (initialConfig.wikiId) {
+          setWikiId(initialConfig.wikiId);
+          setWikiSkip(false);
+        } else if (ws.length > 0) {
+          setWikiId(ws[0].id);
+        } else {
+          setWikiSkip(true);
+        }
       })
       .catch(() => setWikiSkip(true))
       .finally(() => setLoadingWikis(false));
-  }, [project, client]);
+  }, [initialDone.current, project, client, initialConfig]);
+
+  // Fetch branches when repo changes (and repos are loaded)
+  useEffect(() => {
+    if (!project || !repoId || loadingRepos || repos.length === 0) return;
+    const repo = repos.find(r => r.id === repoId);
+    if (!repo) return;
+
+    setLoadingBranches(true);
+    setBranches([]);
+    setBranch("");
+    client.listBranches(project, repoId)
+      .then(bs => {
+        setBranches(bs);
+        if (initialConfig?.branch && bs.includes(initialConfig.branch)) {
+          setBranch(initialConfig.branch);
+        } else if (bs.includes("main")) {
+          setBranch("main");
+        } else if (bs.length > 0) {
+          setBranch(bs[0]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingBranches(false));
+  }, [project, repoId, loadingRepos, repos, client, initialConfig]);
 
   const canConfirm = project && (
-    (repoMode === "existing" && repoId) ||
+    (repoMode === "existing" && repoId && branch) ||
     (repoMode === "create"   && newRepoName.trim())
   );
 
@@ -90,11 +168,13 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
       let finalRepoName = repoMode === "existing"
         ? (repos.find(r => r.id === repoId)?.name || repoId)
         : newRepoName.trim();
+      let finalBranch   = branch;
 
       if (repoMode === "create") {
         const created = await client.createRepo(project, newRepoName.trim());
         finalRepoId   = created.id;
         finalRepoName = created.name;
+        finalBranch   = "main";
       }
 
       const selectedWiki = wikis.find(w => w.id === wikiId);
@@ -102,6 +182,7 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
         project,
         repoId:      finalRepoId,
         repoName:    finalRepoName,
+        branch:      finalBranch,
         wikiId:      wikiSkip ? null : (wikiId || null),
         wikiProject: wikiSkip ? null : (selectedWiki?.projectId ? project : project),
       });
@@ -112,6 +193,10 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
     }
   };
 
+  const selectStyle = { width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, outline: "none", color: T.text, padding: "9px 12px", fontSize: 13, fontFamily: "'Barlow'", cursor: "pointer" };
+
+  const isReconfiguring = !!initialConfig;
+
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Barlow'" }}>
       <style>{FONTS + `@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -120,7 +205,9 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
       <div style={{ width: 520, position: "relative" }}>
         <div style={{ marginBottom: 28 }}>
           <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 36, color: T.amber, letterSpacing: "0.06em" }}>ADO SUPERUI</div>
-          <div style={{ fontSize: 12, color: T.dim, fontFamily: "'JetBrains Mono'", marginTop: 5 }}>set up config repository</div>
+          <div style={{ fontSize: 12, color: T.dim, fontFamily: "'JetBrains Mono'", marginTop: 5 }}>
+            {isReconfiguring ? "reconfigure config repository" : "set up config repository"}
+          </div>
         </div>
 
         <div style={{ background: `${T.cyan}08`, border: `1px solid ${T.cyan}22`, borderRadius: 8, padding: "14px 18px", marginBottom: 22, fontSize: 12, color: T.muted, lineHeight: 1.7 }}>
@@ -138,7 +225,7 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
               <select
                 value={project}
                 onChange={e => setProject(e.target.value)}
-                style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, outline: "none", color: T.text, padding: "9px 12px", fontSize: 13, fontFamily: "'Barlow'", cursor: "pointer" }}
+                style={selectStyle}
               >
                 {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
               </select>
@@ -174,7 +261,7 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
                     <select
                       value={repoId}
                       onChange={e => setRepoId(e.target.value)}
-                      style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, outline: "none", color: T.text, padding: "9px 12px", fontSize: 13, fontFamily: "'Barlow'", cursor: "pointer" }}
+                      style={selectStyle}
                     >
                       <option value="">— select a repo —</option>
                       {repos.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -193,6 +280,27 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
             )}
           </div>
 
+          {/* Branch */}
+          {repoMode === "existing" && (
+            <div style={{ marginBottom: 20 }}>
+              <label style={formLabelStyle}>Branch</label>
+              {loadingBranches ? (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", color: T.dim, fontSize: 12 }}><Spinner size={13} /> Loading branches…</div>
+              ) : branches.length > 0 ? (
+                <select
+                  value={branch}
+                  onChange={e => setBranch(e.target.value)}
+                  style={selectStyle}
+                >
+                  <option value="">— select a branch —</option>
+                  {branches.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              ) : (
+                <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", padding: "8px 0" }}>Select a repository first.</div>
+              )}
+            </div>
+          )}
+
           {/* Wiki */}
           <div style={{ marginBottom: 24 }}>
             <label style={formLabelStyle}>Wiki (optional)</label>
@@ -209,7 +317,7 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
                   value={wikiId}
                   onChange={e => { setWikiId(e.target.value); setWikiSkip(!e.target.value); }}
                   disabled={wikiSkip}
-                  style={{ width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 5, outline: "none", color: wikiSkip ? T.dim : T.text, padding: "9px 12px", fontSize: 13, fontFamily: "'Barlow'", cursor: wikiSkip ? "default" : "pointer", marginBottom: 8 }}
+                  style={{ ...selectStyle, color: wikiSkip ? T.dim : T.text, cursor: wikiSkip ? "default" : "pointer", marginBottom: 8 }}
                 >
                   {wikis.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                 </select>
@@ -232,7 +340,7 @@ export function SetupScreen({ client, org, onSetupComplete, onBack }) {
             </button>
             <button onClick={handleConfirm} disabled={saving || !canConfirm}
               style={{ flex: 1, background: `${T.amber}18`, border: `1px solid ${T.amber}${saving || !canConfirm ? "22" : "44"}`, color: saving || !canConfirm ? `${T.amber}55` : T.amber, padding: "10px", borderRadius: 5, cursor: saving || !canConfirm ? "not-allowed" : "pointer", fontSize: 14, fontFamily: "'Barlow Condensed'", fontWeight: 700, letterSpacing: "0.08em", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-              {saving ? <><Spinner size={13} /> SETTING UP…</> : "CONFIRM →"}
+              {saving ? <><Spinner size={13} /> {isReconfiguring ? "UPDATING…" : "SETTING UP…"}</> : "CONFIRM →"}
             </button>
           </div>
         </div>

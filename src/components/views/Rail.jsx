@@ -11,7 +11,7 @@ const SYNC_LABEL = {
   error:  { text: "Save failed", color: T.red },
 };
 
-export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, workerActivity, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, client, onUpdatePat }) {
+export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, workerActivity, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, client, onUpdatePat, onReconfigure }) {
   // Split into shared and personal, hiding the reserved pinned-pipelines collection
   const shared   = collections.filter(c => c.scope !== "personal");
   const personal = collections.filter(c => c.scope === "personal" && c.id !== PINNED_PIPELINES_ID);
@@ -157,6 +157,10 @@ export function Rail({ profile, org, collections, activeCol, activeView, syncSta
         <div onClick={onClearCache} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", opacity: 0.35, transition: "opacity 0.15s", marginBottom: 9 }}
           onMouseEnter={e => e.currentTarget.style.opacity = 0.7} onMouseLeave={e => e.currentTarget.style.opacity = 0.35}>
           <span style={{ fontSize: 11, color: T.dim }}>↻ Clear Cache</span>
+        </div>
+        <div onClick={onReconfigure} style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", opacity: 0.35, transition: "opacity 0.15s", marginBottom: 9 }}
+          onMouseEnter={e => e.currentTarget.style.opacity = 0.7} onMouseLeave={e => e.currentTarget.style.opacity = 0.35}>
+          <span style={{ fontSize: 11, color: T.dim }}>⚙ Config</span>
         </div>
 
         {/* PAT Swap */}
