@@ -14,6 +14,7 @@ import {
   PipelinesView,
   AppHeader,
   Rail,
+  WorkerStatusView,
 } from "./components/views";
 import { hasStoredCredentials, clearCredentials, loadPAT, clearSessionKey } from "./lib/credentialStore";
 import backgroundWorker from "./lib/backgroundWorker";
@@ -211,6 +212,10 @@ export default function App() {
     setActiveCol(newCol.id);
     setView("resources");
   }, []);
+
+  useEffect(() => {
+    if (client) backgroundWorker.setCollections(collections);
+  }, [collections, client]);
 
   const handleCollectionFilterChange = useCallback((filters) => {
     if (!activeCol) return;
@@ -625,13 +630,18 @@ export default function App() {
           onClearCache={handleClearCache}
           onDisconnect={handleDisconnect}
           onShowPipelines={() => setView("pipelines")}
+          onShowWorkerStatus={() => setView("workerStatus")}
           client={client}
           onUpdatePat={handleUpdatePat}
           onReconfigure={handleReconfigure}
         />
 
-        {/* ── Pipelines full-width view ────────────────────────── */}
-        {view === "pipelines" ? (
+        {/* ── Worker Status full-width view ────────────────────────── */}
+        {view === "workerStatus" ? (
+          <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+            <WorkerStatusView collections={collections} />
+          </div>
+        ) : view === "pipelines" ? (
           <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
             <PipelinesView
               client={client}

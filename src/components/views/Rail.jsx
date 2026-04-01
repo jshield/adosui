@@ -11,7 +11,7 @@ const SYNC_LABEL = {
   error:  { text: "Save failed", color: T.red },
 };
 
-export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, workerActivity, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, client, onUpdatePat, onReconfigure }) {
+export function Rail({ profile, org, collections, activeCol, activeView, syncStatus, workerActivity, onSelectCollection, onNewCollection, onClearCache, onDisconnect, onShowPipelines, onShowWorkerStatus, client, onUpdatePat, onReconfigure }) {
   // Split into shared and personal, hiding the reserved pinned-pipelines collection
   const shared   = collections.filter(c => c.scope !== "personal");
   const personal = collections.filter(c => c.scope === "personal" && c.id !== PINNED_PIPELINES_ID);
@@ -48,13 +48,13 @@ export function Rail({ profile, org, collections, activeCol, activeView, syncSta
 
   const renderCollection = (c) => (
     <div key={c.id} onClick={() => onSelectCollection(c.id)}
-      style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 14px", cursor: "pointer", background: activeCol === c.id && activeView !== "pipelines" ? `${c.color}10` : "transparent", borderLeft: `2px solid ${activeCol === c.id && activeView !== "pipelines" ? c.color : "transparent"}`, transition: "all 0.12s" }}
+      style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 14px", cursor: "pointer", background: activeCol === c.id && activeView !== "pipelines" && activeView !== "workerStatus" ? `${c.color}10` : "transparent", borderLeft: `2px solid ${activeCol === c.id && activeView !== "pipelines" && activeView !== "workerStatus" ? c.color : "transparent"}`, transition: "all 0.12s" }}
       onMouseEnter={e => { if (activeCol !== c.id) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
       onMouseLeave={e => { if (activeCol !== c.id) e.currentTarget.style.background = "transparent"; }}
     >
       <span style={{ fontSize: 15 }}>{c.icon}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 500, color: activeCol === c.id && activeView !== "pipelines" ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
+        <div style={{ fontSize: 12, fontWeight: 500, color: activeCol === c.id && activeView !== "pipelines" && activeView !== "workerStatus" ? T.text : T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
       </div>
       <Dot color={c.color} />
       <button
@@ -93,6 +93,17 @@ export function Rail({ profile, org, collections, activeCol, activeView, syncSta
       >
         <span style={{ fontSize: 14 }}>⚡</span>
         <span style={{ fontSize: 12, color: activeView === "pipelines" ? T.violet : T.muted, fontWeight: 500 }}>Pipelines</span>
+      </div>
+
+      {/* Worker Status shortcut */}
+      <div
+        onClick={onShowWorkerStatus}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", cursor: "pointer", background: activeView === "workerStatus" ? `${T.cyan}10` : "transparent", borderLeft: `2px solid ${activeView === "workerStatus" ? T.cyan : "transparent"}`, transition: "all 0.12s", borderBottom: `1px solid ${T.border}` }}
+        onMouseEnter={e => { if (activeView !== "workerStatus") e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+        onMouseLeave={e => { if (activeView !== "workerStatus") e.currentTarget.style.background = "transparent"; }}
+      >
+        <span style={{ fontSize: 12 }}>◉</span>
+        <span style={{ fontSize: 12, color: activeView === "workerStatus" ? T.cyan : T.muted, fontWeight: 500 }}>Sync Status</span>
       </div>
 
       {/* Collections list */}

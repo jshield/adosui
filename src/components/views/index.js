@@ -11,3 +11,4 @@ export { CollectionResources }                 from "./CollectionResources";
 export { SearchResultsList }                   from "./SearchResultsList";
 export { AppHeader }                           from "./AppHeader";
 export { Rail }                                from "./Rail";
+export { WorkerStatusView }                    from "./WorkerStatusView";

@@ -10,6 +10,8 @@ class BackgroundWorker {
     this.client = null;
     this.projects = [];
     this.currentIndex = 0;
+    this.scopedProjectNames = new Set();
+    this.projectStatus = {};
     this.intervalId = null;
     this.isRunning = false;
     this.isPaused = false;
@@ -23,6 +25,46 @@ class BackgroundWorker {
   setClient(client) {
     this.client = client;
     this.loadProjects();
+  }
+
+  setCollections(collections) {
+    const names = new Set();
+    for (const col of collections) {
+      for (const p of col.projects || []) {
+        names.add(p);
+      }
+    }
+    this.scopedProjectNames = names;
+    for (const name of Object.keys(this.projectStatus)) {
+      this.projectStatus[name].scoped = names.has(name);
+    }
+  }
+
+  _getProjectStatus(projectName) {
+    if (!this.projectStatus[projectName]) {
+      this.projectStatus[projectName] = {
+        scoped: this.scopedProjectNames.has(projectName),
+        lastRefresh: null,
+        resources: {
+          repos: { status: "pending", error: null, timestamp: null },
+          pipelines: { status: "pending", error: null, timestamp: null },
+          pipelineRuns: { status: "pending", error: null, timestamp: null },
+          pullRequests: { status: "pending", error: null, timestamp: null },
+          testRuns: { status: "pending", error: null, timestamp: null },
+          serviceConnections: { status: "pending", error: null, timestamp: null },
+        },
+      };
+    }
+    return this.projectStatus[projectName];
+  }
+
+  _markResource(projectName, resource, error) {
+    const ps = this._getProjectStatus(projectName);
+    ps.resources[resource] = {
+      status: error ? "error" : "ok",
+      error: error ? error.message || String(error) : null,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   async loadProjects() {
@@ -58,6 +100,9 @@ class BackgroundWorker {
       lastRefresh: this.lastRefresh,
       lastPipelineRunsRefresh: this.lastPipelineRunsRefresh,
       isRunning: this.isRunning,
+      projectStatus: this.projectStatus,
+      projects: this.projects,
+      scopedProjectNames: this.scopedProjectNames,
     }));
   }
 
@@ -68,6 +113,9 @@ class BackgroundWorker {
       lastRefresh: this.lastRefresh,
       lastPipelineRunsRefresh: this.lastPipelineRunsRefresh,
       isRunning: this.isRunning,
+      projectStatus: this.projectStatus,
+      projects: this.projects,
+      scopedProjectNames: this.scopedProjectNames,
     });
     return () => this.listeners.delete(callback);
   }
@@ -112,13 +160,29 @@ class BackgroundWorker {
 
   getBatch() {
     if (!this.projects.length) return [];
-    const count = Math.min(BATCH_SIZE, this.projects.length);
+
+    const scoped = this.projects.filter(p => this.scopedProjectNames.has(p.name));
+    const nonScoped = this.projects.filter(p => !this.scopedProjectNames.has(p.name));
+
     const batch = [];
-    for (let i = 0; i < count; i++) {
-      const idx = (this.currentIndex + i) % this.projects.length;
-      batch.push(this.projects[idx]);
+    const count = Math.min(BATCH_SIZE, this.projects.length);
+
+    // Scoped projects always refreshed first
+    for (const p of scoped) {
+      if (batch.length >= count) break;
+      batch.push(p);
     }
-    this.currentIndex = (this.currentIndex + count) % this.projects.length;
+
+    // Fill remaining slots from non-scoped, rotating via currentIndex
+    if (batch.length < count && nonScoped.length) {
+      const remaining = count - batch.length;
+      for (let i = 0; i < remaining; i++) {
+        const idx = (this.currentIndex + i) % nonScoped.length;
+        batch.push(nonScoped[idx]);
+      }
+      this.currentIndex = (this.currentIndex + remaining) % nonScoped.length;
+    }
+
     return batch;
   }
 
@@ -149,22 +213,27 @@ class BackgroundWorker {
 
   async refreshProject(projectName) {
     const keyPrefix = `project:${projectName}:`;
+    const ps = this._getProjectStatus(projectName);
+    ps.scoped = this.scopedProjectNames.has(projectName);
 
     let repos = [];
     try {
       repos = await this.client.getRepos(projectName);
       repos.forEach(r => { r._projectName = projectName; });
       cache.set(keyPrefix + "repos", repos, CACHE_TTL);
-    } catch (e) {}
+      this._markResource(projectName, "repos", null);
+    } catch (e) { this._markResource(projectName, "repos", e); }
 
     let pipelines = [];
     try {
       pipelines = await this.client.getPipelines(projectName);
       pipelines.forEach(p => { p._projectName = projectName; });
       cache.set(keyPrefix + "pipelines", pipelines, CACHE_TTL);
-    } catch (e) {}
+      this._markResource(projectName, "pipelines", null);
+    } catch (e) { this._markResource(projectName, "pipelines", e); }
 
     // Fetch latest run for each pipeline using a batched builds call.
+    let runsError = null;
     try {
       const runsMap = {};
       if (pipelines.length) {
@@ -204,26 +273,34 @@ class BackgroundWorker {
 
       cache.set(keyPrefix + "pipelineRuns", runsMap, RUNS_TTL);
       this.lastPipelineRunsRefresh = new Date().toISOString();
+      this._markResource(projectName, "pipelineRuns", null);
     } catch (e) {
+      runsError = e;
       this.log(`Failed to fetch pipeline runs for ${projectName}: ${e.message}`);
+      this._markResource(projectName, "pipelineRuns", e);
     }
 
     try {
       const prs = await this.client.getPullRequests(projectName);
       prs.forEach(pr => { pr._projectName = projectName; });
       cache.set(keyPrefix + "prs", prs, CACHE_TTL);
-    } catch (e) {}
+      this._markResource(projectName, "pullRequests", null);
+    } catch (e) { this._markResource(projectName, "pullRequests", e); }
 
     try {
       const testRuns = await this.client.getTestRuns(projectName);
       cache.set(keyPrefix + "testRuns", testRuns, CACHE_TTL);
-    } catch (e) {}
+      this._markResource(projectName, "testRuns", null);
+    } catch (e) { this._markResource(projectName, "testRuns", e); }
 
     try {
       const serviceConnections = await this.client.getServiceConnections(projectName);
       serviceConnections.forEach(sc => { sc._projectName = projectName; });
       cache.set(keyPrefix + "serviceConnections", serviceConnections, CACHE_TTL);
-    } catch (e) {}
+      this._markResource(projectName, "serviceConnections", null);
+    } catch (e) { this._markResource(projectName, "serviceConnections", e); }
+
+    ps.lastRefresh = new Date().toISOString();
   }
 }
 
