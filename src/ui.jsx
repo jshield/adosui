@@ -12,7 +12,6 @@ import {
   ResourceDetail,
   CollectionResources,
   SearchResultsList,
-  SearchResultDetail,
   PipelinesView,
   AppHeader,
   Rail,
@@ -655,14 +654,18 @@ export default function App() {
                   onSaveLogComments={handleSaveLogComments}
                   syncStatus={syncStatus}
                 />
-              ) : selectedSearchResult ? (
-                <SearchResultDetail
-                  result={selectedSearchResult}
-                  collection={collection}
-                  org={org}
+              ) : selectedSearchResult && collection ? (
+                <ResourceDetail
                   client={client}
-                  onWorkItemToggle={handleWorkItemToggle}
+                  resource={{ type: selectedSearchResult.type, data: selectedSearchResult.item }}
+                  org={org}
+                  collection={collection}
+                  profile={profile}
                   onResourceToggle={handleResourceToggle}
+                  onWorkItemToggle={handleWorkItemToggle}
+                  onAddComment={handleAddComment}
+                  onSaveLogComments={handleSaveLogComments}
+                  syncStatus={syncStatus}
                 />
               ) : collection ? (
                 <CollectionResources

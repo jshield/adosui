@@ -10,6 +10,5 @@ export { CollectionDropdown }                 from "./CollectionDropdown";
 export { ResourceDetail }                      from "./ResourceDetail";
 export { CollectionResources }                 from "./CollectionResources";
 export { SearchResultsList }                   from "./SearchResultsList";
-export { SearchResultDetail }                  from "./SearchResultDetail";
 export { AppHeader }                           from "./AppHeader";
 export { Rail }                                from "./Rail";

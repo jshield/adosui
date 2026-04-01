@@ -122,14 +122,14 @@ function WorkItemDetail({ client, workItem, org, collection, profile, onResource
   const projectId = client._projects?.find(p => p.name === project)?.id || project;
 
   useEffect(() => {
-    if (projectId) {
+    if (projectId && collection) {
       setWiCommentsLoading(true);
       client.getWorkItemComments(workItem.id, projectId)
         .then(setWiComments)
         .catch(() => setWiComments([]))
         .finally(() => setWiCommentsLoading(false));
     }
-  }, [workItem.id, projectId]);
+  }, [workItem.id, projectId, collection]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -180,29 +180,31 @@ function WorkItemDetail({ client, workItem, org, collection, profile, onResource
             })}
         </div>
 
-        <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
-          <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Comments</div>
-          {!projectId ? (
-            <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>Project not available</div>
-          ) : wiCommentsLoading ? (
-            <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading...</div>
-          ) : (
-            <CommentThread
-              comments={wiComments.map(c => ({
-                author: c.createdBy?.displayName || "Unknown",
-                createdAt: c.createdDate,
-                text: c.text || "",
-              }))}
-              onAdd={async (text) => {
-                await client.addWorkItemComment(workItem.id, text, projectId);
-                const updated = await client.getWorkItemComments(workItem.id, projectId);
-                setWiComments(updated);
-              }}
-              authorName={profile?.displayName || ""}
-              disabled={syncStatus === "saving"}
-            />
-          )}
-        </div>
+        {collection && (
+          <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 16, marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.05em" }}>Comments</div>
+            {!projectId ? (
+              <div style={{ color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>Project not available</div>
+            ) : wiCommentsLoading ? (
+              <div style={{ display: "flex", gap: 10, alignItems: "center", color: T.dim, fontSize: 12, fontFamily: "'JetBrains Mono'" }}><Spinner /> Loading...</div>
+            ) : (
+              <CommentThread
+                comments={wiComments.map(c => ({
+                  author: c.createdBy?.displayName || "Unknown",
+                  createdAt: c.createdDate,
+                  text: c.text || "",
+                }))}
+                onAdd={async (text) => {
+                  await client.addWorkItemComment(workItem.id, text, projectId);
+                  const updated = await client.getWorkItemComments(workItem.id, projectId);
+                  setWiComments(updated);
+                }}
+                authorName={profile?.displayName || ""}
+                disabled={syncStatus === "saving"}
+              />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
