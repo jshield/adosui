@@ -1,17 +1,21 @@
 import { T, WI_TYPE_COLOR, stateColor, branchName } from "../../lib";
 import { Spinner, SectionLabel, SelectableRow, EmptyState, ResourceToggle } from "../ui";
 
-export function SearchResultsList({ results, searching, searchQuery, collection, selectedResult, onSelect, onWorkItemToggle, onResourceToggle }) {
-  if (searching) {
-    return <EmptyState icon={<Spinner size={22} />} message="Searching…" />;
+export function SearchResultsList({ results, searching, searchQuery, searchProgress, collection, selectedResult, onSelect, onWorkItemToggle, onResourceToggle }) {
+  const total = results ? results.workItems.length + results.repos.length + results.pipelines.length + results.prs.length + results.serviceConnections.length + results.wikiPages.length : 0;
+  const progressText = searchProgress && searchProgress.total > 0
+    ? `${searchProgress.searched}/${searchProgress.total} projects searched`
+    : null;
+
+  if (searching && total === 0) {
+    return <EmptyState icon={<Spinner size={22} />} message={progressText || "Searching…"} />;
   }
 
-  if (!results) {
+  if (!searching && !results) {
     return <EmptyState icon="🔍" message="Type to search all resources" />;
   }
 
-  const total = results.workItems.length + results.repos.length + results.pipelines.length + results.prs.length + results.serviceConnections.length + results.wikiPages.length;
-  if (total === 0) {
+  if (!searching && total === 0) {
     return <EmptyState icon="∅" message={`No results for "${searchQuery}"`} />;
   }
 
@@ -21,6 +25,11 @@ export function SearchResultsList({ results, searching, searchQuery, collection,
 
   return (
     <div style={{ flex: 1, overflowY: "auto" }}>
+      {searching && progressText && (
+        <div style={{ padding: "6px 14px", fontSize: 10, color: T.dimmer, fontFamily: "'JetBrains Mono'", borderBottom: `1px solid ${T.border}` }}>
+          {progressText}
+        </div>
+      )}
       {results.workItems.length > 0 && (
         <>
           <SectionLabel count={results.workItems.length}>WORK ITEMS</SectionLabel>

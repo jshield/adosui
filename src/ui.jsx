@@ -59,6 +59,8 @@ export default function App() {
   const [searchResults,         setSearchResults]         = useState(null);
   const [searching,             setSearching]             = useState(false);
   const [selectedSearchResult,  setSelectedSearchResult]  = useState(null);
+  const [searchProgress,        setSearchProgress]        = useState(null);
+  const searchTokenRef = useRef(0);
 
   // Sync status
   const [syncStatus,  setSyncStatus]  = useState("idle");
@@ -419,33 +421,61 @@ export default function App() {
   const handleSearch = useCallback(async (q) => {
     setSearchQuery(q);
     setSelectedSearchResult(null);
+    setSearchProgress(null);
     if (!q.trim()) { setSearchResults(null); return; }
-    setSearching(true);
-    try {
-      const lower = q.toLowerCase();
-      const col = collections.find(c => c.id === activeCol);
-      const projects = col?.projects?.length ? col.projects : [];
 
-      const [wi, repos, pipelines, prs, scs, wikis] = await Promise.allSettled([
-        client.searchWorkItems(q, {}, projects),
-        projects.length ? client.getReposForProjects(projects) : client.getAllRepos(),
-        projects.length ? client.getPipelinesForProjects(projects) : client.getAllPipelines(),
-        projects.length ? client.getPullRequestsForProjects(projects) : client.getAllPullRequests(),
-        projects.length ? client.getServiceConnectionsForProjects(projects) : client.getAllServiceConnections(),
-        client.searchWikiPages(q, projects),
-      ]);
-      setSearchResults({
-        workItems:         wi.status === "fulfilled" ? wi.value.slice(0, 20) : [],
-        repos:             repos.status === "fulfilled" ? repos.value.filter(r => r.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
-        pipelines:         pipelines.status === "fulfilled" ? pipelines.value.filter(p => p.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
-        prs:               prs.status === "fulfilled" ? prs.value.filter(pr => pr.title?.toLowerCase().includes(lower)).slice(0, 20) : [],
-        serviceConnections: scs.status === "fulfilled" ? scs.value.filter(sc => sc.name?.toLowerCase().includes(lower)).slice(0, 20) : [],
-        wikiPages:         wikis.status === "fulfilled" ? wikis.value.slice(0, 20) : [],
+    const token = ++searchTokenRef.current;
+    setSearching(true);
+
+    const empty = { workItems: [], repos: [], pipelines: [], prs: [], serviceConnections: [], wikiPages: [] };
+    setSearchResults(empty);
+
+    const lower = q.toLowerCase();
+    const col = collections.find(c => c.id === activeCol);
+    const projects = col?.projects?.length ? col.projects : [];
+
+    const makeProgress = (type) => (name, searched, total) => {
+      if (searchTokenRef.current !== token) return;
+      setSearchProgress(prev => {
+        const next = { ...(prev || {}), [type]: { searched, total } };
+        const perProject = ["repos", "pipelines", "prs", "serviceConnections"];
+        const counts = perProject.filter(t => next[t]).map(t => next[t]);
+        if (counts.length) {
+          const searched = Math.min(...counts.map(c => c.searched));
+          const total = counts[0].total;
+          next.searched = searched;
+          next.total = total;
+        }
+        return next;
       });
+    };
+
+    const mergeResults = (type, items) => {
+      if (searchTokenRef.current !== token) return;
+      setSearchResults(prev => ({ ...(prev || empty), [type]: items }));
+    };
+
+    const filterMerge = (type, items) => {
+      const filtered = type === "repos"   ? items.filter(r => r.name?.toLowerCase().includes(lower))
+                    : type === "pipelines" ? items.filter(p => p.name?.toLowerCase().includes(lower))
+                    : type === "prs"       ? items.filter(pr => pr.title?.toLowerCase().includes(lower))
+                    :                        items.filter(sc => sc.name?.toLowerCase().includes(lower));
+      mergeResults(type, filtered);
+    };
+
+    try {
+      await Promise.allSettled([
+        client.searchWorkItems(q, {}, projects).then(items => mergeResults("workItems", items)),
+        (projects.length ? client.getReposForProjects(projects, makeProgress("repos")) : client.getAllRepos(false, makeProgress("repos"))).then(items => filterMerge("repos", items)),
+        (projects.length ? client.getPipelinesForProjects(projects, makeProgress("pipelines")) : client.getAllPipelines(false, makeProgress("pipelines"))).then(items => filterMerge("pipelines", items)),
+        (projects.length ? client.getPullRequestsForProjects(projects, makeProgress("prs")) : client.getAllPullRequests(false, makeProgress("prs"))).then(items => filterMerge("prs", items)),
+        (projects.length ? client.getServiceConnectionsForProjects(projects, makeProgress("serviceConnections")) : client.getAllServiceConnections(false, makeProgress("serviceConnections"))).then(items => filterMerge("serviceConnections", items)),
+        client.searchWikiPages(q, projects).then(items => mergeResults("wikiPages", items)),
+      ]);
     } catch (e) {
       console.error("Search error:", e);
     } finally {
-      setSearching(false);
+      if (searchTokenRef.current === token) setSearching(false);
     }
   }, [client, collections, activeCol]);
 
@@ -559,8 +589,9 @@ export default function App() {
         <AppHeader
           searchQuery={searchQuery}
           onSearch={handleSearch}
-          onClearSearch={() => { setSearchQuery(""); setSearchResults(null); setSelectedSearchResult(null); }}
+          onClearSearch={() => { setSearchQuery(""); setSearchResults(null); setSelectedSearchResult(null); setSearchProgress(null); searchTokenRef.current++; }}
           searching={searching}
+          searchProgress={searchProgress}
           syncStatus={syncStatus}
           profile={profile}
         />
@@ -612,6 +643,7 @@ export default function App() {
                   results={searchResults}
                   searching={searching}
                   searchQuery={searchQuery}
+                  searchProgress={searchProgress}
                   collection={collection}
                   selectedResult={selectedSearchResult}
                   onSelect={r => { setSelectedResource({ type: r.type, data: r.item }); setSelectedSearchResult(r); setSelectedWI(null); setView("resources"); }}

@@ -170,61 +170,65 @@ export class ADOClient {
     }
   }
 
-  async _collectFromProjects(cacheKey, fetcher, projectNames, forceRefresh) {
+  async _collectFromProjects(cacheKey, fetcher, projectNames, forceRefresh, onProjectSearched) {
     if (forceRefresh) cache.invalidate(cacheKey);
     if (!projectNames.length) {
       if (!this._projects.length) await this.getProjects();
       projectNames = this._projects.map(p => p.name);
     }
+    const total = projectNames.length;
+    let searched = 0;
     const all = [];
     for (const name of projectNames) {
       const items = await this._getProjectCached(name, cacheKey, fetcher);
       all.push(...items);
+      searched++;
+      if (onProjectSearched) onProjectSearched(name, searched, total);
     }
     return all;
   }
 
-  async getAllRepos(forceRefresh = false) {
+  async getAllRepos(forceRefresh = false, onProjectSearched) {
     if (forceRefresh) cache.invalidate("project:");
-    return this._collectFromProjects("repos", n => this.getRepos(n), [], forceRefresh);
+    return this._collectFromProjects("repos", n => this.getRepos(n), [], forceRefresh, onProjectSearched);
   }
 
-  async getAllPipelines(forceRefresh = false) {
+  async getAllPipelines(forceRefresh = false, onProjectSearched) {
     if (forceRefresh) cache.invalidate("project:");
-    return this._collectFromProjects("pipelines", n => this.getPipelines(n), [], forceRefresh);
+    return this._collectFromProjects("pipelines", n => this.getPipelines(n), [], forceRefresh, onProjectSearched);
   }
 
-  async getAllPullRequests(forceRefresh = false) {
+  async getAllPullRequests(forceRefresh = false, onProjectSearched) {
     if (forceRefresh) cache.invalidate("project:");
-    return this._collectFromProjects("prs", n => this.getPullRequests(n), [], forceRefresh);
+    return this._collectFromProjects("prs", n => this.getPullRequests(n), [], forceRefresh, onProjectSearched);
   }
 
-  async getAllTestRuns(forceRefresh = false) {
+  async getAllTestRuns(forceRefresh = false, onProjectSearched) {
     if (forceRefresh) cache.invalidate("project:");
-    return this._collectFromProjects("testRuns", n => this.getTestRuns(n), [], forceRefresh);
+    return this._collectFromProjects("testRuns", n => this.getTestRuns(n), [], forceRefresh, onProjectSearched);
   }
 
-  async getAllServiceConnections(forceRefresh = false) {
+  async getAllServiceConnections(forceRefresh = false, onProjectSearched) {
     if (forceRefresh) cache.invalidate("project:");
-    return this._collectFromProjects("serviceConnections", n => this.getServiceConnections(n), [], forceRefresh);
+    return this._collectFromProjects("serviceConnections", n => this.getServiceConnections(n), [], forceRefresh, onProjectSearched);
   }
 
   // ── Project-scoped variants ───────────────────────────────────────────────
 
-  async getReposForProjects(projectNames) {
-    return this._collectFromProjects("repos", n => this.getRepos(n), projectNames);
+  async getReposForProjects(projectNames, onProjectSearched) {
+    return this._collectFromProjects("repos", n => this.getRepos(n), projectNames, false, onProjectSearched);
   }
 
-  async getPipelinesForProjects(projectNames) {
-    return this._collectFromProjects("pipelines", n => this.getPipelines(n), projectNames);
+  async getPipelinesForProjects(projectNames, onProjectSearched) {
+    return this._collectFromProjects("pipelines", n => this.getPipelines(n), projectNames, false, onProjectSearched);
   }
 
-  async getPullRequestsForProjects(projectNames) {
-    return this._collectFromProjects("prs", n => this.getPullRequests(n), projectNames);
+  async getPullRequestsForProjects(projectNames, onProjectSearched) {
+    return this._collectFromProjects("prs", n => this.getPullRequests(n), projectNames, false, onProjectSearched);
   }
 
-  async getServiceConnectionsForProjects(projectNames) {
-    return this._collectFromProjects("serviceConnections", n => this.getServiceConnections(n), projectNames);
+  async getServiceConnectionsForProjects(projectNames, onProjectSearched) {
+    return this._collectFromProjects("serviceConnections", n => this.getServiceConnections(n), projectNames, false, onProjectSearched);
   }
 
   async getRepos(project) {
@@ -463,6 +467,41 @@ export class ADOClient {
     try {
       const r = await this._fetch(url);
       return r.value || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async getWikiPagesForProject(project) {
+    try {
+      const wikis = await this.listWikis(project);
+      const all = [];
+      for (const wiki of wikis) {
+        const url = `${this.base}/${encodeURIComponent(project)}/_apis/wiki/wikis/${encodeURIComponent(wiki.id)}/pages?api-version=7.1&recursionLevel=full`;
+        try {
+          const r = await this._fetch(url);
+          const flatten = (pages) => {
+            for (const p of (pages || [])) {
+              const pagePath = (p.path || "").replace(/\.md$/i, "");
+              all.push({
+                id: `${wiki.id}:${pagePath}`,
+                path: pagePath,
+                name: (p.path || "").split("/").pop()?.replace(/\.md$/i, "") || "",
+                wikiId: wiki.id,
+                _wikiId: wiki.id,
+                _wikiName: wiki.name,
+                _pageId: p.id,
+                wikiName: wiki.name,
+                project,
+                _projectName: project,
+              });
+              if (p.subPages) flatten(p.subPages);
+            }
+          };
+          flatten(r.value);
+        } catch { /* skip failed wiki */ }
+      }
+      return all;
     } catch {
       return [];
     }

@@ -1,7 +1,7 @@
 import { T } from "../../lib/theme";
 import { Spinner, UserAvatar } from "../ui";
 
-export function AppHeader({ searchQuery, onSearch, onClearSearch, searching, syncStatus, profile }) {
+export function AppHeader({ searchQuery, onSearch, onClearSearch, searching, searchProgress, syncStatus, profile }) {
   return (
     <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 50, background: T.panel, borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", padding: "0 20px", zIndex: 100 }}>
       {/* Global search */}
@@ -18,7 +18,7 @@ export function AppHeader({ searchQuery, onSearch, onClearSearch, searching, syn
       </div>
 
       {/* Status indicators */}
-      {searching && <span style={{ marginLeft: 12, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>searching…</span>}
+      {searching && <span style={{ marginLeft: 12, fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'" }}>{searchProgress && searchProgress.total > 0 ? `searching… (${searchProgress.searched}/${searchProgress.total} projects)` : "searching…"}</span>}
       {syncStatus === "saving" && <span style={{ marginLeft: 12, fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>↑ saving…</span>}
       {syncStatus === "saved"  && <span style={{ marginLeft: 12, fontSize: 10, color: T.green, fontFamily: "'JetBrains Mono'" }}>✓ saved</span>}
       {syncStatus === "error"  && <span style={{ marginLeft: 12, fontSize: 10, color: T.red, fontFamily: "'JetBrains Mono'" }}>⚠ sync failed</span>}
