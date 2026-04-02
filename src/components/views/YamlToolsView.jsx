@@ -13,6 +13,7 @@ import {
   generateBranchName,
   interpolateCommitMessage,
   isGlobPattern,
+  loadAvailableRepos,
   BUILT_IN_TOOL_BUILDER,
 } from "../../lib/yamlToolsManager";
 
@@ -50,6 +51,7 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
   const [toolLoading, setToolLoading] = useState(false);
   const [toolFiles, setToolFiles] = useState([]); // [{ path, items, objectId, raw }] for multi-file mode
   const [selectedFilePath, setSelectedFilePath] = useState(null); // file path selected for adding items
+  const [availableRepos, setAvailableRepos] = useState([]); // [{ project, repoId, repoName }] for tool builder
 
   // View phase
   const [phase, setPhase] = useState("loading");
@@ -67,11 +69,16 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
       setLoading(true);
       setError(null);
       try {
-        const discovered = await discoverTools(client, repoConfig, collections);
+        // Load tools and available repos in parallel
+        const [discovered, repos] = await Promise.all([
+          discoverTools(client, repoConfig, collections),
+          loadAvailableRepos(client),
+        ]);
         if (!cancelled) {
           // Always inject the built-in tool builder at the top
           const withBuiltIn = [BUILT_IN_TOOL_BUILDER, ...discovered.filter(t => t.id !== BUILT_IN_TOOL_BUILDER.id)];
           setTools(withBuiltIn);
+          setAvailableRepos(repos);
           setPhase("tool-select");
         }
       } catch (e) {
@@ -152,22 +159,22 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
       const toolDef = transformToolBuilderValues(values);
       setPendingItem(toolDef);
 
-      // Determine commit target based on location
-      if (values.location === "central") {
-        // Write to config repo's central tools directory
-        const toolsPath = repoConfig.toolsPath || "/config/tools";
-        const centralFile = `${toolsPath}/${toolDef.id}.yml`;
+      // Look up the selected target repo from available repos
+      const targetRepo = availableRepos.find(
+        r => r.project === values.targetProject && r.repoName === values.targetRepo
+      );
+      if (targetRepo) {
         setCommitTarget({
-          project: repoConfig.project,
-          repoId:   repoConfig.repoId,
-          branch:   repoConfig.branch || "main",
-          filePath: centralFile,
-          arrayPath: "",  // root is the tools array in the file
+          project:  targetRepo.project,
+          repoId:   targetRepo.repoId,
+          branch:   targetRepo.defaultBranch,
+          filePath: activeTool.target.file,
+          arrayPath: activeTool.target.arrayPath,
         });
       } else {
-        // Write to the config repo's .superui/tools.yml (per-repo equivalent)
+        // Fallback to config repo
         setCommitTarget({
-          project: repoConfig.project,
+          project:  repoConfig.project,
           repoId:   repoConfig.repoId,
           branch:   repoConfig.branch || "main",
           filePath: activeTool.target.file,
@@ -186,7 +193,7 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
     setBranchName(name);
     setCommitMessage(msg);
     setPhase("commit");
-  }, [activeTool, repoConfig]);
+  }, [activeTool, repoConfig, availableRepos]);
 
   // ── Commit handler ───────────────────────────────────────────────────────
   const handleCommit = useCallback(async (bName, cMsg) => {
@@ -224,26 +231,14 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
     // Create branch
     await client.createBranch(project, repoId, bName, baseBranch);
 
-    // For tool builder central mode, write a single-file tool definition
+    // Write the item to the YAML file
     let freshObjectId;
-    if (commitTarget && commitTarget.arrayPath === "") {
-      const content = yaml.dump({ tools: [pendingItem] }, { lineWidth: 120, quotingType: '"' });
-      await client.pushGitFile(
-        project, repoId, filePath, content, null, cMsg,
-        profile?.displayName, profile?.emailAddress, bName
-      );
-      try {
-        const refreshed = await client.readGitFile(project, repoId, filePath, bName);
-        freshObjectId = refreshed?.objectId || null;
-      } catch { freshObjectId = null; }
-    } else {
-      freshObjectId = await writeYamlArrayItem(
+    freshObjectId = await writeYamlArrayItem(
         client, project, repoId,
         filePath, arrayPath,
         pendingItem, targetObjectId, bName, cMsg,
         { displayName: profile?.displayName, emailAddress: profile?.emailAddress }
       );
-    }
 
     // Update local state
     const itemWithFile = activeTool._isMultiFile && selectedFilePath
@@ -386,6 +381,7 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
             </div>
             <SchemaForm
               fields={toolFields}
+              context={{ availableRepos }}
               onSubmit={handleFormSubmit}
               onCancel={handleBackToItems}
               submitLabel="Next →"
@@ -670,7 +666,7 @@ function ItemSummary({ item, fields }) {
  * Handles:
  *   - schemaMode "ref" → schema.ref
  *   - schemaMode "inline" (default) → schema.fields
- *   - location is stripped (meta-field for commit targeting)
+ *   - targetProject/targetRepo are stripped (meta-fields for commit targeting)
  *
  * @param {object} values - Raw form values from SchemaForm
  * @returns {object} Proper tool definition for tools.yml

@@ -13,6 +13,7 @@ import { Btn, formLabelStyle } from "./index";
  *
  * Field options:
  *   visibleWhen — optional function (values) => boolean controlling visibility
+ *   optionsSource — optional function (values, context) => string[] for dynamic select options
  *
  * @param {object} props
  * @param {Array} props.fields - Normalised field definitions
@@ -20,8 +21,9 @@ import { Btn, formLabelStyle } from "./index";
  * @param {() => void} props.onCancel
  * @param {string} [props.submitLabel="Submit"]
  * @param {boolean} [props.disabled=false]
+ * @param {object} [props.context] - Arbitrary data passed to optionsSource/visibleWhen callbacks
  */
-export function SchemaForm({ fields, onSubmit, onCancel, submitLabel = "Submit", disabled = false }) {
+export function SchemaForm({ fields, onSubmit, onCancel, submitLabel = "Submit", disabled = false, context }) {
   const initialise = useCallback(() => buildDefault(fields), [fields]);
 
   const [values, setValues] = useState(initialise);
@@ -69,6 +71,8 @@ export function SchemaForm({ fields, onSubmit, onCancel, submitLabel = "Submit",
           touched={touched[f.key] ? touched : undefined}
           disabled={disabled}
           depth={0}
+          formValues={values}
+          context={context}
         />
       ))}
       <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
@@ -214,7 +218,7 @@ const fieldInputErrorStyle = {
 
 // ── FormField (recursive) ──────────────────────────────────────────────────────
 
-function FormField({ field, value, onChange, onBlur, error, errors, touched, disabled, depth }) {
+function FormField({ field, value, onChange, onBlur, error, errors, touched, disabled, depth, formValues, context }) {
   const indent = depth > 0 ? 16 : 0;
 
   return (
@@ -243,6 +247,8 @@ function FormField({ field, value, onChange, onBlur, error, errors, touched, dis
         touched={touched}
         disabled={disabled}
         depth={depth}
+        formValues={formValues}
+        context={context}
       />
       {typeof error === "string" && (
         <div style={{ fontSize: 10, color: T.red, marginTop: 4, fontFamily: "'JetBrains Mono'" }}>
@@ -255,7 +261,7 @@ function FormField({ field, value, onChange, onBlur, error, errors, touched, dis
 
 // ── Field-type renderers ──────────────────────────────────────────────────────
 
-function FieldInput({ field, value, onChange, onBlur, error, errors, touched, disabled, depth }) {
+function FieldInput({ field, value, onChange, onBlur, error, errors, touched, disabled, depth, formValues, context }) {
   const style = error ? fieldInputErrorStyle : fieldInputStyle;
 
   switch (field.type) {
@@ -293,17 +299,19 @@ function FieldInput({ field, value, onChange, onBlur, error, errors, touched, di
         </label>
       );
 
-    case "select":
+    case "select": {
+      const opts = field.optionsSource ? field.optionsSource(formValues || {}, context || {}) : (field.options || []);
       return (
         <select value={value || ""} onChange={e => onChange(e.target.value)}
           onBlur={onBlur} disabled={disabled}
           style={{ ...style, cursor: disabled ? "not-allowed" : "pointer" }}>
           <option value="" style={{ background: T.panel }}>Select…</option>
-          {(field.options || []).map(opt => (
+          {opts.map(opt => (
             <option key={opt} value={opt} style={{ background: T.panel }}>{opt}</option>
           ))}
         </select>
       );
+    }
 
     case "textarea":
       return (
@@ -320,10 +328,10 @@ function FieldInput({ field, value, onChange, onBlur, error, errors, touched, di
       );
 
     case "object":
-      return renderObjectField(field, value, onChange, disabled, depth, errors, touched);
+      return renderObjectField(field, value, onChange, disabled, depth, errors, touched, formValues, context);
 
     case "array":
-      return renderArrayField(field, value, onChange, disabled, depth);
+      return renderArrayField(field, value, onChange, disabled, depth, formValues, context);
 
     default:
       return (
@@ -335,7 +343,7 @@ function FieldInput({ field, value, onChange, onBlur, error, errors, touched, di
 
 // ── Object field renderer ──────────────────────────────────────────────────────
 
-function renderObjectField(field, value, onChange, disabled, depth, errors, touched) {
+function renderObjectField(field, value, onChange, disabled, depth, errors, touched, formValues, context) {
   if (!Array.isArray(field.fields)) return null;
   const obj = (value && typeof value === "object") ? value : {};
 
@@ -364,6 +372,8 @@ function renderObjectField(field, value, onChange, disabled, depth, errors, touc
             touched={touched}
             disabled={disabled}
             depth={depth + 1}
+            formValues={formValues}
+            context={context}
           />
         );
       })}
@@ -373,7 +383,7 @@ function renderObjectField(field, value, onChange, disabled, depth, errors, touc
 
 // ── Array field renderer ───────────────────────────────────────────────────────
 
-function renderArrayField(field, value, onChange, disabled, depth) {
+function renderArrayField(field, value, onChange, disabled, depth, formValues, context) {
   const items = Array.isArray(value) ? value : [];
 
   const addItem = () => {
@@ -441,6 +451,8 @@ function renderArrayField(field, value, onChange, disabled, depth) {
               error={undefined}
               disabled={disabled}
               depth={depth + 1}
+              formValues={formValues}
+              context={context}
             />
           ))}
         </div>

@@ -456,6 +456,27 @@ export function interpolateCommitMessage(template, tool, values) {
     .replace(/\{field:(\w+)\}/g, (_, key) => values[key] ?? "");
 }
 
+// ── Available repos helper ────────────────────────────────────────────────────
+
+/**
+ * Load all available repos from the ADO client (cache-first via getAllRepos)
+ * and return a simplified list for use in tool builder dropdowns.
+ *
+ * @param {import('./adoClient').ADOClient} client
+ * @returns {Promise<Array<{ project: string, repoId: string, repoName: string }>>}
+ */
+export async function loadAvailableRepos(client) {
+  const allRepos = await client.getAllRepos();
+  return allRepos
+    .map(r => ({
+      project:        r._projectName || r.project?.name || "",
+      repoId:         r.id,
+      repoName:       r.name,
+      defaultBranch:  (r.defaultBranch || "").replace("refs/heads/", "") || "main",
+    }))
+    .filter(r => r.project && r.repoId && r.repoName);
+}
+
 // ── Built-in tool: Tool Builder ───────────────────────────────────────────────
 
 /**
@@ -490,10 +511,24 @@ export const BUILT_IN_TOOL_BUILDER = {
         key: "icon", label: "Icon (emoji)", type: "string", default: "📄",
       },
       {
-        key: "location", label: "Location", type: "select", required: true,
-        options: ["repo", "central"],
-        description: "Per-repo (.superui/tools.yml) or central (config repo tools directory)",
-        default: "repo",
+        key: "targetProject", label: "Target Project", type: "select", required: true,
+        description: "The ADO project to store this tool definition in",
+        optionsSource: (values, ctx) => {
+          const repos = ctx.availableRepos || [];
+          return [...new Set(repos.map(r => r.project))].filter(Boolean).sort();
+        },
+      },
+      {
+        key: "targetRepo", label: "Target Repository", type: "select", required: true,
+        description: "The repo to store this tool definition in (.superui/tools.yml)",
+        optionsSource: (values, ctx) => {
+          const repos = ctx.availableRepos || [];
+          return repos
+            .filter(r => r.project === values.targetProject)
+            .map(r => r.repoName)
+            .filter(Boolean)
+            .sort();
+        },
       },
       {
         key: "target", label: "Target", type: "object", required: true,
