@@ -123,6 +123,7 @@ export function WorkerStatusView({ collections }) {
     lastRefresh: null,
     lastPipelineRunsRefresh: null,
     isRunning: false,
+    isLeader: false,
     projectStatus: {},
     projects: [],
     scopedProjectNames: new Set(),
@@ -132,7 +133,7 @@ export function WorkerStatusView({ collections }) {
     return backgroundWorker.subscribe(setState);
   }, []);
 
-  const { projectStatus, isRunning, lastRefresh, lastPipelineRunsRefresh, activityLog, projects, scopedProjectNames } = state;
+  const { projectStatus, isRunning, isLeader, lastRefresh, lastPipelineRunsRefresh, activityLog, projects, scopedProjectNames } = state;
 
   // Merge all projects with status data; unsynced projects show as pending
   const EMPTY_RESOURCES = {
@@ -181,7 +182,7 @@ export function WorkerStatusView({ collections }) {
             background: isRunning ? `${T.green}18` : `${T.dimmer}20`,
             color: isRunning ? T.green : T.dim,
           }}>
-            {isRunning ? "running" : "stopped"}
+            {isRunning ? "running" : isLeader ? "stopped" : "syncing in other tab"}
           </span>
         </div>
         <div style={{ display: "flex", gap: 20, fontSize: 10, fontFamily: "'JetBrains Mono'", color: T.dim }}>

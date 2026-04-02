@@ -1,43 +1,90 @@
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const PREFIX = "ado-cache:";
 
 const cache = {
   _data: {},
+
   init() {
+    // Migrate legacy single-blob cache
     try {
-      const stored = localStorage.getItem("ado-superui-cache");
-      if (stored) this._data = JSON.parse(stored);
+      localStorage.removeItem("ado-superui-cache");
     } catch {}
-  },
-  save() {
+
+    // Hydrate from individual localStorage keys
     try {
-      localStorage.setItem("ado-superui-cache", JSON.stringify(this._data));
+      for (let i = 0; i < localStorage.length; i++) {
+        const lsKey = localStorage.key(i);
+        if (!lsKey.startsWith(PREFIX)) continue;
+        const cacheKey = lsKey.slice(PREFIX.length);
+        try {
+          this._data[cacheKey] = JSON.parse(localStorage.getItem(lsKey));
+        } catch {}
+      }
     } catch {}
+
+    // Listen for cross-tab changes
+    if (typeof window !== "undefined") {
+      window.addEventListener("storage", (e) => {
+        if (!e.key || !e.key.startsWith(PREFIX)) return;
+        const cacheKey = e.key.slice(PREFIX.length);
+        if (e.newValue === null) {
+          delete this._data[cacheKey];
+        } else {
+          try {
+            this._data[cacheKey] = JSON.parse(e.newValue);
+          } catch {}
+        }
+      });
+    }
   },
+
+  _persist(key) {
+    const entry = this._data[key];
+    if (entry) {
+      try {
+        localStorage.setItem(PREFIX + key, JSON.stringify(entry));
+      } catch {}
+    } else {
+      try {
+        localStorage.removeItem(PREFIX + key);
+      } catch {}
+    }
+  },
+
   get(key) {
     const entry = this._data[key];
     if (!entry) return null;
     if (Date.now() - entry.timestamp > entry.ttl) {
       delete this._data[key];
-      this.save();
+      this._persist(key);
       return null;
     }
     return entry.data;
   },
+
   set(key, data, ttl = CACHE_TTL) {
     this._data[key] = { data, timestamp: Date.now(), ttl };
-    this.save();
+    this._persist(key);
   },
+
   clear() {
+    for (const key of Object.keys(this._data)) {
+      try {
+        localStorage.removeItem(PREFIX + key);
+      } catch {}
+    }
     this._data = {};
-    this.save();
   },
+
   invalidate(prefix) {
     for (const key of Object.keys(this._data)) {
       if (key.startsWith(prefix)) {
         delete this._data[key];
+        try {
+          localStorage.removeItem(PREFIX + key);
+        } catch {}
       }
     }
-    this.save();
   }
 };
 

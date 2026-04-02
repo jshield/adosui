@@ -16,6 +16,7 @@ class BackgroundWorker {
     this.projectStatus = {};
     this.intervalId = null;
     this.isRunning = false;
+    this.isLeader = false;
     this.isPaused = false;
     this.activityLog = [];
     this.lastRefresh = null;
@@ -102,6 +103,7 @@ class BackgroundWorker {
       lastRefresh: this.lastRefresh,
       lastPipelineRunsRefresh: this.lastPipelineRunsRefresh,
       isRunning: this.isRunning,
+      isLeader: this.isLeader,
       projectStatus: this.projectStatus,
       projects: this.projects,
       scopedProjectNames: this.scopedProjectNames,
@@ -115,6 +117,7 @@ class BackgroundWorker {
       lastRefresh: this.lastRefresh,
       lastPipelineRunsRefresh: this.lastPipelineRunsRefresh,
       isRunning: this.isRunning,
+      isLeader: this.isLeader,
       projectStatus: this.projectStatus,
       projects: this.projects,
       scopedProjectNames: this.scopedProjectNames,
@@ -122,9 +125,27 @@ class BackgroundWorker {
     return () => this.listeners.delete(callback);
   }
 
+  async acquireLeadership() {
+    const ctrl = new AbortController();
+    this._releaseLock = () => ctrl.abort();
+    navigator.locks.request("ado-background-worker", { signal: ctrl.signal }, async () => {
+      this.isLeader = true;
+      this.notify();
+      this.log("This tab is the sync leader");
+      await this.start();
+      // Lock is held as long as this promise is pending
+      return new Promise(() => {});
+    }).catch(() => {
+      // Lock rejected or released
+      this.isLeader = false;
+      this.notify();
+    });
+  }
+
   async start() {
     if (this.isRunning) return;
     this.isRunning = true;
+    this.isLeader = true;
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
     this.log("Background worker started");
     this.notify();
@@ -136,6 +157,11 @@ class BackgroundWorker {
   stop() {
     if (!this.isRunning) return;
     this.isRunning = false;
+    this.isLeader = false;
+    if (this._releaseLock) {
+      this._releaseLock();
+      this._releaseLock = null;
+    }
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     if (this.intervalId) {
       clearInterval(this.intervalId);

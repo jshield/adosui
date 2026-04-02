@@ -126,7 +126,7 @@ export default function App() {
         setAppPhase("app");
         setView("newCollection");
         backgroundWorker.setClient(c);
-        backgroundWorker.start();
+        backgroundWorker.acquireLeadership();
       } else {
         setAppPhase("setup");
       }
@@ -605,7 +605,7 @@ export default function App() {
             setAppPhase("app");
             setView("newCollection");
             backgroundWorker.setClient(c);
-            backgroundWorker.start();
+            backgroundWorker.acquireLeadership();
           } else {
             setAppPhase("setup");
           }
