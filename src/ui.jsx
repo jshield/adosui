@@ -443,9 +443,9 @@ export default function App() {
   }, [collections, pinnedToolsCollection, updateCollection]);
 
   // Global search
-  const handleSearch = useCallback(async (q) => {
+  const handleSearch = useCallback(async (qOrEvent) => {
+    const q = typeof qOrEvent === "string" ? qOrEvent : qOrEvent?.target?.value ?? "";
     setSearchQuery(q);
-    setSelectedSearchResult(null);
     setSearchProgress(null);
     if (!q.trim()) { setSearchResults(null); return; }
 
