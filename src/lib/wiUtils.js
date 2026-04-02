@@ -1,4 +1,5 @@
 import { T } from "./theme";
+import { isInCollection as registryIsInCollection } from "./resourceTypes";
 
 /* ── Work item type colours / short labels ────────────────────── */
 export const WI_TYPE_COLOR = {
@@ -69,7 +70,13 @@ export const prStatus = s => {
 export const isInCollection = (collection, type, id) => {
   if (!collection) return false;
   const sid = String(id);
-  
+
+  // Delegate to registry-based check
+  if (registryIsInCollection) {
+    return registryIsInCollection(type, collection, sid);
+  }
+
+  // Fallback: hardcoded checks
   if (type === "workitem") {
     return (collection.workItemIds || []).includes(sid);
   }
@@ -90,6 +97,9 @@ export const isInCollection = (collection, type, id) => {
   }
   if (type === "yamltool") {
     return (collection.yamlTools || []).some(yt => String(yt.id) === sid);
+  }
+  if (type === "link") {
+    return (collection.links || []).some(l => l.url === sid);
   }
   return false;
 };

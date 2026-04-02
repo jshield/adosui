@@ -15,6 +15,7 @@ import {
   isGlobPattern,
   loadAvailableRepos,
   BUILT_IN_TOOL_BUILDER,
+  BUILT_IN_LINK_RULES,
 } from "../../lib/yamlToolsManager";
 
 /**
@@ -75,8 +76,8 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
           loadAvailableRepos(client),
         ]);
         if (!cancelled) {
-          // Always inject the built-in tool builder at the top
-          const withBuiltIn = [BUILT_IN_TOOL_BUILDER, ...discovered.filter(t => t.id !== BUILT_IN_TOOL_BUILDER.id)];
+          // Always inject the built-in tool builder and link rules at the top
+          const withBuiltIn = [BUILT_IN_TOOL_BUILDER, BUILT_IN_LINK_RULES, ...discovered.filter(t => t.id !== BUILT_IN_TOOL_BUILDER.id && t.id !== BUILT_IN_LINK_RULES.id)];
           setTools(withBuiltIn);
           setAvailableRepos(repos);
           setPhase("tool-select");
@@ -154,8 +155,8 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
 
   // ── Form submit → go to commit dialog ────────────────────────────────────
   const handleFormSubmit = useCallback((values) => {
-    if (activeTool._isBuiltIn) {
-      // Transform tool builder form values into a proper tool definition
+    if (activeTool.id === BUILT_IN_TOOL_BUILDER.id) {
+      // Tool Builder — transform form values into a proper tool definition
       const toolDef = transformToolBuilderValues(values);
       setPendingItem(toolDef);
 
@@ -181,13 +182,23 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
           arrayPath: activeTool.target.arrayPath,
         });
       }
+    } else if (activeTool._isBuiltIn) {
+      // Other built-in tools (e.g. Link Rules) — commit to config repo
+      setPendingItem(values);
+      setCommitTarget({
+        project:  repoConfig.project,
+        repoId:   repoConfig.repoId,
+        branch:   repoConfig.branch || "main",
+        filePath: activeTool.target.file,
+        arrayPath: activeTool.target.arrayPath,
+      });
     } else {
       setPendingItem(values);
       setCommitTarget(null); // use tool's own source repo
     }
 
     const name = generateBranchName(activeTool);
-    const msg = activeTool._isBuiltIn
+    const msg = activeTool.id === BUILT_IN_TOOL_BUILDER.id
       ? `Add tool "${values.name || values.id}" via Tool Builder`
       : interpolateCommitMessage(activeTool.commitMessageTemplate, activeTool, values);
     setBranchName(name);

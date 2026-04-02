@@ -1,4 +1,6 @@
 import { cache } from "../lib";
+import { getWorkerTypes } from "./resourceTypes";
+import { fetchForProject } from "./resourceApi";
 
 const TICK_INTERVAL = 2 * 60 * 1000;
 const BATCH_SIZE = 5;
@@ -216,6 +218,26 @@ class BackgroundWorker {
     const ps = this._getProjectStatus(projectName);
     ps.scoped = this.scopedProjectNames.has(projectName);
 
+    // Registry-driven refresh for generic REST types
+    const workerTypes = getWorkerTypes();
+    for (const rt of workerTypes) {
+      const cacheKey = rt.worker?.cacheKey;
+      if (!cacheKey || rt.source?.type !== "rest") continue;
+
+      // Skip types with special handling (pipeline runs are handled separately below)
+      if (cacheKey === "pipelineRuns" || cacheKey === "pipelines" || cacheKey === "repos" || cacheKey === "prs" || cacheKey === "testRuns" || cacheKey === "serviceConnections") continue;
+
+      try {
+        const items = await fetchForProject(this.client, rt, projectName);
+        items.forEach(item => { item._projectName = projectName; });
+        cache.set(keyPrefix + cacheKey, items, CACHE_TTL);
+        this._markResource(projectName, cacheKey, null);
+      } catch (e) {
+        this._markResource(projectName, cacheKey, e);
+      }
+    }
+
+    // Keep existing hardcoded handlers for types with complex logic (repos, pipelines, PRs, etc.)
     let repos = [];
     try {
       repos = await this.client.getRepos(projectName);

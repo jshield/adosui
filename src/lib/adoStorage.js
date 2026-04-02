@@ -126,6 +126,17 @@ export function migrateCollection(raw) {
     );
   }
 
+  // Migrate links (bookmarked URLs with regex classification)
+  if (!Array.isArray(col.links)) {
+    col.links = [];
+  } else {
+    col.links = col.links.map(l =>
+      typeof l === "string"
+        ? { url: l, label: "", comments: [], addedAt: "" }
+        : { comments: [], addedAt: "", ...l }
+    );
+  }
+
   // Remove legacy flat arrays to keep the YAML clean
   delete col.repoIds;
   delete col.pipelineIds;
@@ -201,6 +212,12 @@ function serialise(collection) {
       name:     yt.name || "",
       icon:     yt.icon || "📄",
       comments: yt.comments || [],
+    })),
+    links: (collection.links || []).map(l => ({
+      url:      l.url,
+      label:    l.label || "",
+      comments: l.comments || [],
+      addedAt:  l.addedAt || "",
     })),
   };
 }
@@ -371,6 +388,7 @@ export class ADOStorage {
       serviceConnections: [],
       wikiPages: [],
       yamlTools: [],
+      links: [],
     };
   }
 
@@ -402,6 +420,7 @@ export class ADOStorage {
       serviceConnections: [],
       wikiPages: [],
       yamlTools: [],
+      links: [],
     };
   }
 }

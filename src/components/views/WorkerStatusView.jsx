@@ -1,15 +1,28 @@
 import { useState, useEffect } from "react";
 import { T } from "../../lib/theme";
 import backgroundWorker from "../../lib/backgroundWorker";
+import { getWorkerTypes } from "../../lib/resourceTypes";
 
-const RESOURCE_LABELS = {
-  repos: "Repos",
-  pipelines: "Pipelines",
-  pipelineRuns: "Runs",
-  pullRequests: "PRs",
-  testRuns: "Tests",
-  serviceConnections: "SvcConn",
-};
+// Build resource labels from registry + legacy entries
+function buildResourceLabels() {
+  const labels = {
+    repos: "Repos",
+    pipelines: "Pipelines",
+    pipelineRuns: "Runs",
+    pullRequests: "PRs",
+    testRuns: "Tests",
+    serviceConnections: "SvcConn",
+  };
+  const workerTypes = getWorkerTypes();
+  for (const rt of workerTypes) {
+    if (rt.worker?.cacheKey && !labels[rt.worker.cacheKey]) {
+      labels[rt.worker.cacheKey] = rt.name;
+    }
+  }
+  return labels;
+}
+
+const RESOURCE_LABELS = buildResourceLabels();
 
 function timeAgo(iso) {
   if (!iso) return "never";

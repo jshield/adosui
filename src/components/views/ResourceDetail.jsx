@@ -86,9 +86,12 @@ marked.setOptions({
   breaks: true
 });
 
+import { getType } from "../../lib/resourceTypes";
+
 export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, onSaveLogComments, syncStatus }) {
   const { type, data } = resource;
 
+  // Custom detail components for built-in types
   if (type === "workitem") {
     return <WorkItemDetail client={client} workItem={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
@@ -110,7 +113,49 @@ export function ResourceDetail({ client, resource, org, collection, profile, onR
   if (type === "yamltool") {
     return <YamlToolDetail tool={data} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
   }
+
+  // Generic detail for registry-defined types without custom component
+  const rt = getType(type);
+  if (rt) {
+    return <GenericResourceDetail rt={rt} item={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+  }
+
   return null;
+}
+
+function GenericResourceDetail({ rt, item, org, collection, profile, onResourceToggle, onAddComment, syncStatus }) {
+  const dp = rt.display ? {
+    title: item[rt.display.titleField] || item[rt.idField] || "Untitled",
+    subtitle: rt.display.subtitleField ? item[rt.display.subtitleField] : null,
+    icon: rt.icon,
+    color: rt.color,
+  } : { title: String(item[rt.idField] || "Untitled"), icon: rt.icon, color: rt.color };
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ padding: "18px 24px 16px", borderBottom: `1px solid ${T.border}`, background: T.panel, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 22 }}>{dp.icon}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'Barlow Condensed'", fontWeight: 700, fontSize: 20, color: T.heading }}>{dp.title}</div>
+            {dp.subtitle && <div style={{ fontSize: 12, color: T.dim, fontFamily: "'JetBrains Mono'" }}>{dp.subtitle}</div>}
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ fontSize: 13, color: T.muted }}>No detail view configured for this resource type.</div>
+        {/* Show all fields as key-value pairs */}
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, overflow: "hidden" }}>
+          {Object.entries(item).filter(([k]) => !k.startsWith("_")).map(([key, val]) => (
+            <div key={key} style={{ display: "flex", padding: "8px 12px", borderBottom: `1px solid ${T.border}` }}>
+              <span style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", width: 160, flexShrink: 0 }}>{key}</span>
+              <span style={{ fontSize: 12, color: T.text, flex: 1, wordBreak: "break-all" }}>{typeof val === "object" ? JSON.stringify(val) : String(val ?? "")}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function WorkItemDetail({ client, workItem, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, syncStatus }) {

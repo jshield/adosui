@@ -3,16 +3,16 @@ import { T, FONTS } from "./lib/theme";
 import { ADOClient } from "./lib/adoClient";
 import { ADOStorage, PINNED_PIPELINES_ID, PINNED_TOOLS_ID, ConflictError, migrateCollection } from "./lib/adoStorage";
 import { syncCollectionToWiki } from "./lib/wikiSync";
+import { loadLinkRules } from "./lib/linkRules";
+import { loadResourceTypes, getType, getSearchableTypes, getId, getDisplayProps, toggleInCollection, addCommentToCollection, mapItemToCollection } from "./lib/resourceTypes";
+import { search as resourceSearch, fetchAll, fetchForProjects } from "./lib/resourceApi";
 import {
   ConnectScreen,
   SetupScreen,
   CollectionBuilder,
-  ResourcePanel,
+  CollectionView,
   ResourceDetail,
-  CollectionResources,
-  SearchResultsList,
   PipelinesView,
-  AppHeader,
   Rail,
   WorkerStatusView,
   YamlToolsView,
@@ -51,7 +51,10 @@ export default function App() {
   const [collections,  setCollections]  = useState([]);
   const [activeCol,    setActiveCol]    = useState(null);
   const [selectedWI,   setSelectedWI]   = useState(null);
-  const [selectedResource, setSelectedResource] = useState(null); // { type: 'workitem'|'repo'|'pipeline'|'pr', data: object }
+
+  // Tab state (resource detail tabs)
+  const [openTabs, setOpenTabs] = useState([]);
+  const [activeTabId, setActiveTabId] = useState(null);
 
   // View
   const [view, setView] = useState("search"); // "search" | "newCollection" | "resources" | "pipelines"
@@ -60,7 +63,6 @@ export default function App() {
   const [searchQuery,           setSearchQuery]           = useState("");
   const [searchResults,         setSearchResults]         = useState(null);
   const [searching,             setSearching]             = useState(false);
-  const [selectedSearchResult,  setSelectedSearchResult]  = useState(null);
   const [searchProgress,        setSearchProgress]        = useState(null);
   const searchTokenRef = useRef(0);
 
@@ -68,6 +70,12 @@ export default function App() {
   const [syncStatus,  setSyncStatus]  = useState("idle");
   const [toast,       setToast]       = useState(null);
   const [workerActivity, setWorkerActivity] = useState({ activityLog: [], lastRefresh: null, isRunning: false });
+
+  // Link rules (regex classification for bookmarked URLs)
+  const [linkRules, setLinkRules] = useState({ rules: [], objectId: null });
+
+  // Resource types registry
+  const [resourceTypesLoaded, setResourceTypesLoaded] = useState(false);
   const saveTimerRef  = useRef(null);
   const pendingSaves  = useRef(new Set());
 
@@ -102,8 +110,14 @@ export default function App() {
       if (cfg) {
         setSyncStatus("saving");
         try {
-          const cols = await stor.loadAll();
+          const [cols, rules] = await Promise.all([
+            stor.loadAll(),
+            loadLinkRules(c, cfg),
+          ]);
           setCollections(cols);
+          setLinkRules(rules);
+          // Load resource types (non-blocking)
+          loadResourceTypes(c, cfg).then(() => setResourceTypesLoaded(true)).catch(() => {});
           setSyncStatus("idle");
         } catch (e) {
           setSyncStatus("error");
@@ -133,8 +147,14 @@ export default function App() {
       setStorage(stor);
       setSyncStatus("saving");
       try {
-        const cols = await stor.loadAll();
+        const [cols, rules] = await Promise.all([
+          stor.loadAll(),
+          loadLinkRules(client, cfg),
+        ]);
         setCollections(cols);
+        setLinkRules(rules);
+        // Load resource types (non-blocking)
+        loadResourceTypes(client, cfg).then(() => setResourceTypesLoaded(true)).catch(() => {});
         setSyncStatus("idle");
       } catch (e) {
         setSyncStatus("error");
@@ -207,6 +227,7 @@ export default function App() {
       pipelines: [],
       prIds: [],
       comments: [],
+      links: [],
     });
     setCollections(p => [...p, newCol]);
     pendingSaves.current.add(newCol.id);
@@ -251,44 +272,14 @@ export default function App() {
   const handleResourceToggle = useCallback((type, resourceId, colId, wikiItem) => {
     updateCollection(colId, c => {
       const rid = String(resourceId);
-      if (type === "repo") {
-        const repos = c.repos || [];
-        const exists = repos.some(r => r.id === rid);
-        return { ...c, repos: exists ? repos.filter(r => r.id !== rid) : [...repos, { id: rid, comments: [] }] };
+
+      // Use registry-based toggle if type is defined
+      const rt = getType(type);
+      if (rt && rt.collectionField) {
+        return toggleInCollection(type, c, rid, wikiItem);
       }
-      if (type === "pipeline") {
-        const pipes = c.pipelines || [];
-        const exists = pipes.some(p => String(p.id) === rid);
-        return { ...c, pipelines: exists ? pipes.filter(p => String(p.id) !== rid) : [...pipes, { id: rid, name: "", project: "", folder: "", configurationType: "", comments: [] }] };
-      }
-      if (type === "pr") {
-        const prIds = c.prIds || [];
-        return { ...c, prIds: prIds.includes(rid) ? prIds.filter(id => id !== rid) : [...prIds, rid] };
-      }
-      if (type === "serviceconnection") {
-        const scs = c.serviceConnections || [];
-        const exists = scs.some(sc => String(sc.id) === rid);
-        return { ...c, serviceConnections: exists ? scs.filter(sc => String(sc.id) !== rid) : [...scs, { id: rid, project: "", type: "", comments: [] }] };
-      }
-      if (type === "wiki") {
-        const wps = c.wikiPages || [];
-        const exists = wps.some(wp => String(wp.id) === rid);
-        if (exists) return { ...c, wikiPages: wps.filter(wp => String(wp.id) !== rid) };
-        const item = wikiItem;
-        return { ...c, wikiPages: [...wps, {
-          id:       rid,
-          path:     (item?.path || item?.name || "").replace(/\.md$/i, ""),
-          wikiId:   item?._wikiId || item?.wikiId || "",
-          wikiName: item?._wikiName || item?.wikiName || "",
-          project:  item?._projectName || item?.project || "",
-          comments: [],
-        }] };
-      }
-      if (type === "yamltool") {
-        const yts = c.yamlTools || [];
-        const exists = yts.some(yt => String(yt.id) === rid);
-        return { ...c, yamlTools: exists ? yts.filter(yt => String(yt.id) !== rid) : [...yts, { id: rid, name: wikiItem?.name || "", icon: wikiItem?.icon || "📄", comments: [] }] };
-      }
+
+      // Fallback for unknown types
       return c;
     });
   }, [updateCollection]);
@@ -301,60 +292,33 @@ export default function App() {
       authorId:  profile.id || "",
       createdAt: new Date().toISOString(),
     };
-    updateCollection(colId, c => {
-      if (resourceType === "repo") {
-        return {
-          ...c,
-          repos: (c.repos || []).map(r =>
-            r.id === String(resourceId)
-              ? { ...r, comments: [...(r.comments || []), comment] }
-              : r
-          ),
-        };
-      }
-      if (resourceType === "pipeline") {
-        return {
-          ...c,
-          pipelines: (c.pipelines || []).map(p =>
-            String(p.id) === String(resourceId)
-              ? { ...p, comments: [...(p.comments || []), comment] }
-              : p
-          ),
-        };
-      }
-      if (resourceType === "serviceconnection") {
-        return {
-          ...c,
-          serviceConnections: (c.serviceConnections || []).map(sc =>
-            String(sc.id) === String(resourceId)
-              ? { ...sc, comments: [...(sc.comments || []), comment] }
-              : sc
-          ),
-        };
-      }
-      if (resourceType === "wiki") {
-        return {
-          ...c,
-          wikiPages: (c.wikiPages || []).map(wp =>
-            String(wp.id) === String(resourceId)
-              ? { ...wp, comments: [...(wp.comments || []), comment] }
-              : wp
-          ),
-        };
-      }
-      if (resourceType === "yamltool") {
-        return {
-          ...c,
-          yamlTools: (c.yamlTools || []).map(yt =>
-            String(yt.id) === String(resourceId)
-              ? { ...yt, comments: [...(yt.comments || []), comment] }
-              : yt
-          ),
-        };
-      }
-      return c;
-    });
+    updateCollection(colId, c => addCommentToCollection(resourceType, c, String(resourceId), comment));
   }, [profile, updateCollection]);
+
+  // ── Tab management ────────────────────────────────────────────────────
+  const openTab = useCallback((type, item) => {
+    const id = getId(type, item);
+    const dp = getDisplayProps(type, item);
+    const tabId = `${type}:${id}`;
+    setOpenTabs(prev => {
+      if (prev.some(t => t.id === tabId)) return prev;
+      return [...prev, { id: tabId, type, data: item, label: dp?.title || String(id) }];
+    });
+    setActiveTabId(tabId);
+  }, []);
+
+  const closeTab = useCallback((tabId) => {
+    setOpenTabs(prev => prev.filter(t => t.id !== tabId));
+    setActiveTabId(prev => prev === tabId ? null : prev);
+  }, []);
+
+  const handleCardClick = useCallback((type, item) => {
+    openTab(type, item);
+  }, [openTab]);
+
+  const handleSearchSelect = useCallback((result) => {
+    openTab(result.type, result.item);
+  }, [openTab]);
 
   const handleSaveLogComments = useCallback((colId, pipelineId, runId, comments) => {
     if (!colId) return;
@@ -488,18 +452,25 @@ export default function App() {
     const token = ++searchTokenRef.current;
     setSearching(true);
 
-    const empty = { workItems: [], repos: [], pipelines: [], prs: [], serviceConnections: [], wikiPages: [] };
+    // Build empty results from searchable types
+    const searchableTypes = getSearchableTypes();
+    const empty = {};
+    searchableTypes.forEach(rt => {
+      empty[rt.id] = [];
+    });
     setSearchResults(empty);
 
     const lower = q.toLowerCase();
     const col = collections.find(c => c.id === activeCol);
     const projects = col?.projects?.length ? col.projects : [];
 
-    const makeProgress = (type) => (name, searched, total) => {
+    const makeProgress = (key) => (name, searched, total) => {
       if (searchTokenRef.current !== token) return;
       setSearchProgress(prev => {
-        const next = { ...(prev || {}), [type]: { searched, total } };
-        const perProject = ["repos", "pipelines", "prs", "serviceConnections"];
+        const next = { ...(prev || {}), [key]: { searched, total } };
+        const perProject = searchableTypes
+          .filter(rt => rt.source?.search?.mode === "filter" && rt.source?.api?.endpoints?.fetchProject)
+          .map(rt => rt.id);
         const counts = perProject.filter(t => next[t]).map(t => next[t]);
         if (counts.length) {
           const searched = Math.min(...counts.map(c => c.searched));
@@ -511,28 +482,46 @@ export default function App() {
       });
     };
 
-    const mergeResults = (type, items) => {
+    const mergeResults = (key, items) => {
       if (searchTokenRef.current !== token) return;
-      setSearchResults(prev => ({ ...(prev || empty), [type]: items }));
-    };
-
-    const filterMerge = (type, items) => {
-      const filtered = type === "repos"   ? items.filter(r => r.name?.toLowerCase().includes(lower))
-                    : type === "pipelines" ? items.filter(p => p.name?.toLowerCase().includes(lower))
-                    : type === "prs"       ? items.filter(pr => pr.title?.toLowerCase().includes(lower))
-                    :                        items.filter(sc => sc.name?.toLowerCase().includes(lower));
-      mergeResults(type, filtered);
+      setSearchResults(prev => ({ ...(prev || empty), [key]: items }));
     };
 
     try {
-      await Promise.allSettled([
-        client.searchWorkItems(q, {}, projects).then(items => mergeResults("workItems", items)),
-        (projects.length ? client.getReposForProjects(projects, makeProgress("repos")) : client.getAllRepos(false, makeProgress("repos"))).then(items => filterMerge("repos", items)),
-        (projects.length ? client.getPipelinesForProjects(projects, makeProgress("pipelines")) : client.getAllPipelines(false, makeProgress("pipelines"))).then(items => filterMerge("pipelines", items)),
-        (projects.length ? client.getPullRequestsForProjects(projects, makeProgress("prs")) : client.getAllPullRequests(false, makeProgress("prs"))).then(items => filterMerge("prs", items)),
-        (projects.length ? client.getServiceConnectionsForProjects(projects, makeProgress("serviceConnections")) : client.getAllServiceConnections(false, makeProgress("serviceConnections"))).then(items => filterMerge("serviceConnections", items)),
-        client.searchWikiPages(q, projects).then(items => mergeResults("wikiPages", items)),
-      ]);
+      const promises = searchableTypes.map(async (rt) => {
+        const searchConf = rt.source?.search;
+        if (!searchConf) return;
+
+        try {
+          if (searchConf.preset === "workItems") {
+            const items = await client.searchWorkItems(q, {}, projects);
+            mergeResults(rt.id, items);
+          } else if (searchConf.mode === "post") {
+            const items = await resourceSearch(client, rt, q, {}, projects);
+            mergeResults(rt.id, items);
+          } else if (searchConf.mode === "filter") {
+            const onProgress = makeProgress(rt.id);
+            let items;
+            if (projects.length && rt.source?.api?.endpoints?.fetchProject) {
+              items = await fetchForProjects(client, rt, projects, onProgress);
+            } else {
+              items = await fetchAll(client, rt, false, onProgress);
+            }
+            const filterField = searchConf.filterField;
+            if (filterField && q) {
+              items = items.filter(item => {
+                const val = item[filterField];
+                return val && String(val).toLowerCase().includes(lower);
+              });
+            }
+            mergeResults(rt.id, items);
+          }
+        } catch (e) {
+          console.warn(`Search error for ${rt.id}:`, e);
+        }
+      });
+
+      await Promise.allSettled(promises);
     } catch (e) {
       console.error("Search error:", e);
     } finally {
@@ -554,7 +543,8 @@ export default function App() {
   const handleClearCache = useCallback(() => {
     client.clearCache();
     setSelectedWI(null);
-    setSelectedResource(null);
+    setOpenTabs([]);
+    setActiveTabId(null);
     const cur = activeCol;
     setActiveCol(null);
     setTimeout(() => setActiveCol(cur), 0);
@@ -599,8 +589,14 @@ export default function App() {
           if (cfg) {
             setSyncStatus("saving");
             try {
-              const cols = await stor.loadAll();
+              const [cols, rules] = await Promise.all([
+                stor.loadAll(),
+                loadLinkRules(c, cfg),
+              ]);
               setCollections(cols);
+              setLinkRules(rules);
+              // Load resource types (non-blocking)
+              loadResourceTypes(c, cfg).then(() => setResourceTypesLoaded(true)).catch(() => {});
               setSyncStatus("idle");
             } catch (e) {
               setSyncStatus("error");
@@ -655,17 +651,7 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ display: "flex", height: "100vh", background: T.bg, color: T.text, fontFamily: "'Barlow'", overflow: "hidden", paddingTop: 50 }}>
-
-        <AppHeader
-          searchQuery={searchQuery}
-          onSearch={handleSearch}
-          onClearSearch={() => { setSearchQuery(""); setSearchResults(null); setSelectedSearchResult(null); setSearchProgress(null); searchTokenRef.current++; }}
-          searching={searching}
-          searchProgress={searchProgress}
-          syncStatus={syncStatus}
-          profile={profile}
-        />
+      <div style={{ display: "flex", height: "100vh", background: T.bg, color: T.text, fontFamily: "'Barlow'", overflow: "hidden" }}>
 
         <Rail
           profile={profile}
@@ -679,10 +665,11 @@ export default function App() {
             if (deleteId) { handleCollectionDelete(deleteId); return; }
             setActiveCol(id);
             setSelectedWI(null);
-            setSelectedResource(null);
+            setOpenTabs([]);
+            setActiveTabId(null);
             setView("resources");
           }}
-          onNewCollection={() => { setView("newCollection"); setSelectedWI(null); setSelectedResource(null); }}
+          onNewCollection={() => { setView("newCollection"); setSelectedWI(null); setOpenTabs([]); setActiveTabId(null); }}
           onClearCache={handleClearCache}
           onDisconnect={handleDisconnect}
           onShowPipelines={() => setView("pipelines")}
@@ -727,89 +714,42 @@ export default function App() {
             />
           </div>
         ) : (
-          <>
-            {/* ── Centre column ─────────────────────────────────── */}
-            <div style={{ width: 370, background: T.panel, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
-              {searchQuery.trim() ? (
-                <SearchResultsList
-                  results={searchResults}
-                  searching={searching}
-                  searchQuery={searchQuery}
-                  searchProgress={searchProgress}
-                  collection={collection}
-                  selectedResult={selectedSearchResult}
-                  onSelect={r => { setSelectedResource({ type: r.type, data: r.item }); setSelectedSearchResult(r); setSelectedWI(null); setView("resources"); }}
-                  onWorkItemToggle={handleWorkItemToggle}
-                  onResourceToggle={handleResourceToggle}
-                />
-              ) : collection ? (
-                <ResourcePanel
-                  client={client}
-                  collection={collection}
-                  selectedResource={selectedResource}
-                  onSelect={(type, data) => { setSelectedResource({ type, data }); setSelectedWI(null); setSelectedSearchResult(null); setView("resources"); }}
-                  onFilterChange={handleCollectionFilterChange}
-                  onWorkItemToggle={handleWorkItemToggle}
-                  onResourceToggle={handleResourceToggle}
-                />
-              ) : (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10, color: T.dim }}>
-                  <span style={{ fontSize: 30 }}>⬡</span>
-                  <span style={{ fontSize: 13, fontFamily: "'Barlow Condensed'", letterSpacing: "0.05em" }}>Select a collection</span>
-                </div>
-              )}
-            </div>
-
-            {/* ── Right column ──────────────────────────────────── */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
-              {view === "newCollection" ? (
-                <CollectionBuilder onDone={handleCollectionCreated} client={client} />
-              ) : selectedResource ? (
-                <ResourceDetail
-                  client={client}
-                  resource={selectedResource}
-                  org={org}
-                  collection={collection}
-                  profile={profile}
-                  onResourceToggle={handleResourceToggle}
-                  onWorkItemToggle={handleWorkItemToggle}
-                  onAddComment={handleAddComment}
-                  onSaveLogComments={handleSaveLogComments}
-                  syncStatus={syncStatus}
-                />
-              ) : selectedSearchResult && collection ? (
-                <ResourceDetail
-                  client={client}
-                  resource={{ type: selectedSearchResult.type, data: selectedSearchResult.item }}
-                  org={org}
-                  collection={collection}
-                  profile={profile}
-                  onResourceToggle={handleResourceToggle}
-                  onWorkItemToggle={handleWorkItemToggle}
-                  onAddComment={handleAddComment}
-                  onSaveLogComments={handleSaveLogComments}
-                  syncStatus={syncStatus}
-                />
-              ) : collection ? (
-                <CollectionResources
-                  client={client}
-                  collection={collection}
-                  profile={profile}
-                  onWorkItemToggle={handleWorkItemToggle}
-                  onResourceToggle={handleResourceToggle}
-                  onAddComment={handleAddComment}
-                  onAddCollectionNote={handleAddCollectionNote}
-                  onProjectChange={handleCollectionProjectChange}
-                  syncStatus={syncStatus}
-                />
-              ) : (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: T.dim }}>
-                  <span style={{ fontSize: 38 }}>⬡</span>
-                  <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 20, letterSpacing: "0.05em" }}>Create a collection to begin</span>
-                </div>
-              )}
-            </div>
-          </>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            {view === "newCollection" ? (
+              <CollectionBuilder onDone={handleCollectionCreated} client={client} />
+            ) : collection ? (
+              <CollectionView
+                client={client}
+                collection={collection}
+                profile={profile}
+                org={org}
+                openTabs={openTabs}
+                activeTabId={activeTabId}
+                onTabSelect={setActiveTabId}
+                onTabClose={closeTab}
+                onCardClick={handleCardClick}
+                searchQuery={searchQuery}
+                onSearch={handleSearch}
+                onClearSearch={() => { setSearchQuery(""); setSearchResults(null); setSearchProgress(null); searchTokenRef.current++; }}
+                searching={searching}
+                searchProgress={searchProgress}
+                searchResults={searchResults}
+                onWorkItemToggle={handleWorkItemToggle}
+                onResourceToggle={handleResourceToggle}
+                onAddComment={handleAddComment}
+                onAddCollectionNote={handleAddCollectionNote}
+                onProjectChange={handleCollectionProjectChange}
+                onSaveLogComments={handleSaveLogComments}
+                syncStatus={syncStatus}
+                linkRules={linkRules}
+              />
+            ) : (
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: T.dim }}>
+                <span style={{ fontSize: 38 }}>⬡</span>
+                <span style={{ fontFamily: "'Barlow Condensed'", fontSize: 20, letterSpacing: "0.05em" }}>Create a collection to begin</span>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </>

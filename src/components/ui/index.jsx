@@ -202,7 +202,9 @@ export const UserAvatar = ({ profile, size = 28 }) => (
 
 /* ── Unified collection toggle button ─────────────────────────── */
 export function ResourceToggle({ type, item, collection, onResourceToggle, onWorkItemToggle, size = "compact" }) {
-  const id = type === "pr" ? item.pullRequestId : type === "workitem" ? item.id : item.id;
+  const id = type === "workitem" ? item.id
+    : type === "pr" ? item.pullRequestId
+    : item.id ?? item.url ?? item.pullRequestId;
   const added = collection && isInCollection(collection, type, id);
   const color = collection?.color || T.amber;
 

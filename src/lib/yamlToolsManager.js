@@ -588,3 +588,70 @@ export const BUILT_IN_TOOL_BUILDER = {
   commitMessageTemplate: "Add {field:id} to Tool Builder",
   _isBuiltIn: true,
 };
+
+// ── Built-in tool: Link Rules ─────────────────────────────────────────────────
+
+/**
+ * Built-in tool for managing link classification rules.
+ * Stores rules in collections/link-rules.yaml in the config repo.
+ * Rules define URL regex patterns that classify bookmarked links,
+ * extract named parameters, and generate deep links to external systems.
+ */
+export const BUILT_IN_LINK_RULES = {
+  id:   "__link-rules__",
+  name: "Link Rules",
+  description: "Define URL patterns to classify and enrich bookmarked links",
+  icon: "🔗",
+  target: {
+    file:      "collections/link-rules.yaml",
+    arrayPath: "rules",
+  },
+  schema: {
+    fields: [
+      {
+        key: "id", label: "Rule ID", type: "string", required: true,
+        description: "Unique identifier (e.g. servicenow-change)",
+      },
+      {
+        key: "name", label: "Display Name", type: "string", required: true,
+      },
+      {
+        key: "icon", label: "Icon (emoji)", type: "string", default: "🔗",
+      },
+      {
+        key: "color", label: "Accent Color (hex)", type: "string", default: "#F59E0B",
+      },
+      {
+        key: "match", label: "URL Regex Pattern", type: "string", required: true,
+        description: "Regular expression to match URLs. Use capture groups for parameter extraction.",
+      },
+      {
+        key: "params", label: "Extracted Parameters", type: "array",
+        description: "Named capture groups to extract from the URL",
+        itemFields: [
+          { key: "name",  label: "Param Name",     type: "string", required: true },
+          { key: "group", label: "Capture Group #", type: "number", required: true, description: "1-based capture group index" },
+        ],
+      },
+      {
+        key: "displayTemplate", label: "Display Label Template", type: "string",
+        description: "Label shown on link cards. Use {paramName} placeholders. E.g. SN Change {instance}/{sysId}",
+      },
+      {
+        key: "linkTemplate", label: "Primary Link Template", type: "string",
+        description: "URL template for the primary action button. Use {paramName} placeholders. E.g. https://{instance}.service-now.com/nav_to.do?uri=change_request.do?sys_id={sysId}",
+      },
+      {
+        key: "links", label: "Additional Link Buttons", type: "array",
+        description: "Extra action buttons shown on link cards",
+        itemFields: [
+          { key: "label",    label: "Button Label", type: "string", required: true },
+          { key: "template", label: "URL Template",  type: "string", required: true },
+        ],
+      },
+    ],
+  },
+  branch: { prefix: "link-rules/" },
+  commitMessageTemplate: "Update link rule {field:id}",
+  _isBuiltIn: true,
+};
