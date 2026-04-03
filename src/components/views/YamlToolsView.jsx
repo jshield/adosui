@@ -4,18 +4,24 @@ import { T } from "../../lib/theme";
 import { Btn, Spinner, Card, SelectableRow, EmptyState, SectionLabel, ResourceToggle } from "../ui";
 import { SchemaForm } from "../ui/SchemaForm";
 import { BranchCommitDialog } from "./BranchCommitDialog";
+import { TemplateList, TemplateEditor } from "./WorkflowEditor";
+import { SchemaEditor } from "./SchemaEditor";
+import { loadWorkflowTemplates, saveWorkflowTemplates } from "../../lib/workflowManager";
 import {
   discoverTools,
   resolveSchema,
   readYamlArray,
   readYamlFilesByGlob,
   writeYamlArrayItem,
+  writeYamlArrayUpdate,
+  writeYamlArrayDelete,
   generateBranchName,
   interpolateCommitMessage,
   isGlobPattern,
   loadAvailableRepos,
   BUILT_IN_TOOL_BUILDER,
   BUILT_IN_LINK_RULES,
+  BUILT_IN_WORKFLOW_BUILDER,
 } from "../../lib/yamlToolsManager";
 
 /**
@@ -54,6 +60,19 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
   const [selectedFilePath, setSelectedFilePath] = useState(null); // file path selected for adding items
   const [availableRepos, setAvailableRepos] = useState([]); // [{ project, repoId, repoName }] for tool builder
 
+  // Workflow builder state
+  const [workflowEditTemplate, setWorkflowEditTemplate] = useState(null); // template being edited
+  const [workflowIsNew, setWorkflowIsNew] = useState(false); // creating new template
+  const [workflowSaving, setWorkflowSaving] = useState(false);
+  const [workflowError, setWorkflowError] = useState(null);
+
+  // Edit mode state (for non-workflow tools)
+  const [selectedEditItem, setSelectedEditItem] = useState(null);
+  const [selectedEditFilePath, setSelectedEditFilePath] = useState(null);
+  const [selectedEditMatchKey, setSelectedEditMatchKey] = useState(null); // id or index
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState(null);
+
   // View phase
   const [phase, setPhase] = useState("loading");
 
@@ -76,8 +95,13 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
           loadAvailableRepos(client),
         ]);
         if (!cancelled) {
-          // Always inject the built-in tool builder and link rules at the top
-          const withBuiltIn = [BUILT_IN_TOOL_BUILDER, BUILT_IN_LINK_RULES, ...discovered.filter(t => t.id !== BUILT_IN_TOOL_BUILDER.id && t.id !== BUILT_IN_LINK_RULES.id)];
+          // Always inject the built-in tools at the top (tool-builder, workflow-builder, link-rules)
+          const withBuiltIn = [
+            BUILT_IN_TOOL_BUILDER,
+            BUILT_IN_WORKFLOW_BUILDER,
+            BUILT_IN_LINK_RULES,
+            ...discovered.filter(t => t.id !== BUILT_IN_TOOL_BUILDER.id && t.id !== BUILT_IN_LINK_RULES.id && t.id !== BUILT_IN_WORKFLOW_BUILDER.id),
+          ];
           setTools(withBuiltIn);
           setAvailableRepos(repos);
           setPhase("tool-select");
@@ -98,12 +122,37 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
   // ── Select a tool ────────────────────────────────────────────────────────
   const handleSelectTool = useCallback(async (tool) => {
     setActiveTool(tool);
-    setPhase("item-list");
-    setToolLoading(true);
     setCommitTarget(null);
     setSelectedFilePath(null);
     setToolFiles([]);
     setError(null);
+
+    // Workflow Builder — load templates from config repo
+    if (tool._isWorkflowBuilder) {
+      setActiveTool(tool);
+      setPhase("item-list");
+      setWorkflowEditTemplate(null);
+      setWorkflowIsNew(false);
+      setWorkflowError(null);
+      setToolFields([]);
+      setToolLoading(true);
+      setError(null);
+      try {
+        const { templates, objectId } = await loadWorkflowTemplates(client, repoConfig);
+        setToolItems(templates);
+        setToolObjectId(objectId);
+      } catch (e) {
+        setError(e.message || "Failed to load workflow templates");
+        setToolItems([]);
+        setToolObjectId(null);
+      } finally {
+        setToolLoading(false);
+      }
+      return;
+    }
+
+    setPhase("item-list");
+    setToolLoading(true);
     try {
       const sourceRepo = tool._sourceRepo;
 
@@ -310,6 +359,242 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
     setError(null);
   }, []);
 
+  // ── Workflow builder handlers ─────────────────────────────────────────────────
+
+  const handleWorkflowEdit = useCallback((template) => {
+    setWorkflowEditTemplate(template);
+    setWorkflowIsNew(false);
+    setWorkflowError(null);
+    setPhase("workflow-edit");
+  }, []);
+
+  const handleWorkflowNew = useCallback(() => {
+    setWorkflowEditTemplate({
+      id: `workflow-${Date.now()}`,
+      name: "New Workflow",
+      icon: "⚡",
+      color: "#F59E0B",
+      wiType: "User Story",
+      description: "",
+      params: [],
+      tracks: [],
+    });
+    setWorkflowIsNew(true);
+    setWorkflowError(null);
+    setPhase("workflow-edit");
+  }, []);
+
+  const handleWorkflowDelete = useCallback(async (templateId) => {
+    if (!confirm("Delete this template?")) return;
+    setWorkflowSaving(true);
+    setWorkflowError(null);
+    try {
+      const remaining = toolItems.filter(t => t.id !== templateId);
+      await saveWorkflowTemplates(client, repoConfig, remaining, toolObjectId, profile);
+      setToolItems(remaining);
+      showToast("Template deleted", T.green);
+    } catch (e) {
+      setWorkflowError(e.message || "Delete failed");
+    } finally {
+      setWorkflowSaving(false);
+    }
+  }, [toolItems, toolObjectId, client, repoConfig, profile, showToast]);
+
+  const handleWorkflowSave = useCallback(async (template) => {
+    setWorkflowSaving(true);
+    setWorkflowError(null);
+    try {
+      let merged;
+      if (workflowIsNew) {
+        merged = [...toolItems.filter(t => t.id !== template.id), template];
+      } else {
+        merged = toolItems.map(t => t.id === template.id ? template : t);
+      }
+      const freshId = await saveWorkflowTemplates(client, repoConfig, merged, toolObjectId, profile);
+      setToolItems(merged);
+      setToolObjectId(freshId);
+      setWorkflowEditTemplate(template);
+      setWorkflowIsNew(false);
+      setPhase("item-list");
+      showToast("Template saved", T.green);
+    } catch (e) {
+      setWorkflowError(e.message || "Save failed");
+    } finally {
+      setWorkflowSaving(false);
+    }
+  }, [workflowIsNew, toolItems, toolObjectId, client, repoConfig, profile, showToast]);
+
+  const handleWorkflowBack = useCallback(() => {
+    setWorkflowEditTemplate(null);
+    setWorkflowIsNew(false);
+    setWorkflowError(null);
+    setPhase("item-list");
+  }, []);
+
+  // ── Edit mode handlers ─────────────────────────────────────────────────────────
+
+  const handleEditItem = useCallback((item, filePath, itemIndex) => {
+    setSelectedEditItem(item);
+    setSelectedEditFilePath(filePath || null);
+    // Prefer id (unambiguous); fall back to original index in file items (for items without id)
+    // Look up the item's position in toolFiles to get a stable index
+    let matchKey = item.id ?? null;
+    if (matchKey === null && filePath) {
+      const file = toolFiles.find(f => f.path === filePath);
+      if (file) {
+        const idx = file.items.indexOf(item);
+        if (idx !== -1) matchKey = idx;
+      }
+    } else if (matchKey === null && !filePath) {
+      const idx = toolItems.indexOf(item);
+      if (idx !== -1) matchKey = idx;
+    }
+    setSelectedEditMatchKey(matchKey);
+    setEditError(null);
+    setPhase("edit-mode");
+  }, [toolFiles, toolItems]);
+
+  const handleEditCancel = useCallback(() => {
+    setSelectedEditItem(null);
+    setSelectedEditFilePath(null);
+    setSelectedEditMatchKey(null);
+    setEditError(null);
+    setPhase("item-list");
+  }, []);
+
+    const handleEditDelete = useCallback(async (item, filePath, itemIndex) => {
+    const matchKey = item.id ?? itemIndex ?? null;
+    const idStr = item.id ? `"${item.id}"` : `index ${itemIndex}`;
+    if (!confirm(`Delete ${idStr}?`)) return;
+
+    let project, repoId, filePath2, arrayPath, baseBranch, objectId;
+    if (activeTool._isMultiFile && filePath) {
+      const sourceRepo = activeTool._sourceRepo;
+      project = sourceRepo.project;
+      repoId = sourceRepo.repoId;
+      filePath2 = filePath;
+      arrayPath = activeTool.target.arrayPath;
+      baseBranch = sourceRepo.branch || "main";
+      const fileEntry = toolFiles.find(f => f.path === filePath);
+      objectId = fileEntry?.objectId || null;
+    } else {
+      const sourceRepo = activeTool._sourceRepo;
+      project = sourceRepo.project;
+      repoId = sourceRepo.repoId;
+      filePath2 = activeTool.target.file;
+      arrayPath = activeTool.target.arrayPath;
+      baseBranch = sourceRepo.branch || "main";
+      objectId = toolObjectId;
+    }
+
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const branchName = generateBranchName(activeTool) + "-delete";
+      await writeYamlArrayDelete(
+        client, project, repoId, filePath2, arrayPath,
+        matchKey, objectId, baseBranch,
+        `Delete item via YAML Tools`,
+        { displayName: profile?.displayName, emailAddress: profile?.emailAddress }
+      );
+
+      // Update local state
+      if (activeTool._isMultiFile && filePath) {
+        setToolFiles(prev => {
+          const updated = prev.map(f => {
+            if (f.path !== filePath) return f;
+            // Find current index of the item being deleted
+            const itemToDelete = f.items.find(itm =>
+              typeof matchKey === "number" ? f.items.indexOf(itm) === matchKey : itm.id === matchKey
+            );
+            if (!itemToDelete) return f;
+            const currentIdx = f.items.indexOf(itemToDelete);
+            const items = f.items.filter((_, i) => i !== currentIdx);
+            return { ...f, items };
+          });
+          const newToolItems = updated.flatMap(f => f.items.map(itm => ({ ...itm, _filePath: f.path })));
+          setToolItems(newToolItems);
+          return updated;
+        });
+      } else {
+        setToolItems(prev => prev.filter((itm, i) => !(itm && (typeof matchKey === "number" ? i === matchKey : itm.id === matchKey))));
+      }
+
+      showToast("Item deleted", T.green);
+    } catch (e) {
+      setEditError(e.message || "Delete failed");
+    } finally {
+      setEditSaving(false);
+    }
+  }, [activeTool, toolFiles, toolObjectId, client, profile, showToast]);
+
+  const handleEditSave = useCallback(async (values) => {
+    let project, repoId, filePath2, arrayPath, baseBranch, objectId;
+    if (activeTool._isMultiFile && selectedEditFilePath) {
+      const sourceRepo = activeTool._sourceRepo;
+      project = sourceRepo.project;
+      repoId = sourceRepo.repoId;
+      filePath2 = selectedEditFilePath;
+      arrayPath = activeTool.target.arrayPath;
+      baseBranch = sourceRepo.branch || "main";
+      const fileEntry = toolFiles.find(f => f.path === selectedEditFilePath);
+      objectId = fileEntry?.objectId || null;
+    } else {
+      const sourceRepo = activeTool._sourceRepo;
+      project = sourceRepo.project;
+      repoId = sourceRepo.repoId;
+      filePath2 = activeTool.target.file;
+      arrayPath = activeTool.target.arrayPath;
+      baseBranch = sourceRepo.branch || "main";
+      objectId = toolObjectId;
+    }
+
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const freshId = await writeYamlArrayUpdate(
+        client, project, repoId, filePath2, arrayPath,
+        values, selectedEditMatchKey, objectId, baseBranch,
+        `Update item via YAML Tools`,
+        { displayName: profile?.displayName, emailAddress: profile?.emailAddress }
+      );
+
+      // Update local state
+      if (activeTool._isMultiFile && selectedEditFilePath) {
+        setToolFiles(prev => {
+          const updated = prev.map(f => {
+            if (f.path !== selectedEditFilePath) return f;
+            const items = f.items.map((itm, i) => {
+              if (typeof selectedEditMatchKey === "number" ? i === selectedEditMatchKey : itm?.id === selectedEditMatchKey) {
+                return values;
+              }
+              return itm;
+            });
+            return { ...f, objectId: freshId || f.objectId, items };
+          });
+          const newToolItems = updated.flatMap(f => f.items.map(itm => ({ ...itm, _filePath: f.path })));
+          setToolItems(newToolItems);
+          return updated;
+        });
+      } else {
+        setToolItems(prev => prev.map((itm, i) => {
+          if (typeof selectedEditMatchKey === "number" ? i === selectedEditMatchKey : itm?.id === selectedEditMatchKey) {
+            return values;
+          }
+          return itm;
+        }));
+      }
+
+      setToolObjectId(freshId || toolObjectId);
+      showToast("Item saved", T.green);
+      handleEditCancel();
+    } catch (e) {
+      setEditError(e.message || "Save failed");
+    } finally {
+      setEditSaving(false);
+    }
+  }, [activeTool, toolFiles, toolObjectId, selectedEditFilePath, selectedEditMatchKey, client, profile, showToast, handleEditCancel]);
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   if (loading || phase === "loading") {
@@ -337,7 +622,7 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
           </>
         ) : (
           <>
-            <button onClick={phase === "commit" ? handleBackToItems : handleBackToTools}
+            <button onClick={phase === "commit" ? handleBackToItems : phase === "workflow-edit" ? handleWorkflowBack : phase === "edit-mode" ? handleEditCancel : handleBackToTools}
               style={{ background: "none", border: "none", color: T.dim, cursor: "pointer", fontSize: 13, padding: 0 }}
             >
               ← Back
@@ -374,7 +659,28 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
           />
         )}
 
-        {phase === "item-list" && activeTool && (
+        {phase === "item-list" && activeTool && activeTool._isWorkflowBuilder && (
+          <TemplateList
+            templates={toolItems}
+            onEdit={handleWorkflowEdit}
+            onDelete={handleWorkflowDelete}
+            onNew={handleWorkflowNew}
+            saving={workflowSaving}
+          />
+        )}
+
+        {phase === "workflow-edit" && workflowEditTemplate && (
+          <TemplateEditor
+            template={workflowEditTemplate}
+            isNew={workflowIsNew}
+            saving={workflowSaving}
+            error={workflowError}
+            onSave={handleWorkflowSave}
+            onCancel={handleWorkflowBack}
+          />
+        )}
+
+        {phase === "item-list" && activeTool && !activeTool._isWorkflowBuilder && (
           <ItemList
             tool={activeTool}
             items={toolItems}
@@ -382,22 +688,45 @@ export function YamlToolsView({ client, repoConfig, collections, profile, showTo
             files={toolFiles}
             loading={toolLoading}
             onAdd={handleStartAdd}
+            onEdit={handleEditItem}
+            onDelete={handleEditDelete}
+            saving={editSaving}
+          />
+        )}
+
+        {phase === "edit-mode" && selectedEditItem && (
+          <SchemaEditor
+            item={selectedEditItem}
+            fields={toolFields}
+            context={{ availableRepos }}
+            onSave={handleEditSave}
+            onCancel={handleEditCancel}
+            saving={editSaving}
+            error={editError}
+            isNew={false}
           />
         )}
 
         {phase === "add-form" && (
-          <div style={{ padding: 20, maxWidth: 500 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, color: T.text, marginBottom: 16 }}>
-              Add new item
-            </div>
-            <SchemaForm
-              fields={toolFields}
-              context={{ availableRepos }}
-              onSubmit={handleFormSubmit}
-              onCancel={handleBackToItems}
-              submitLabel="Next →"
-            />
-          </div>
+          <SchemaEditor
+            item={{}}
+            fields={toolFields}
+            context={{ availableRepos }}
+            onSave={(values) => {
+              setPendingItem(values);
+              const name = generateBranchName(activeTool);
+              const msg = activeTool.id === BUILT_IN_TOOL_BUILDER.id
+                ? `Add tool "${values.name || values.id}" via Tool Builder`
+                : interpolateCommitMessage(activeTool.commitMessageTemplate, activeTool, values);
+              setBranchName(name);
+              setCommitMessage(msg);
+              setPhase("commit");
+            }}
+            onCancel={handleBackToItems}
+            saving={false}
+            error={null}
+            isNew={true}
+          />
         )}
 
         {phase === "commit" && (
@@ -535,7 +864,7 @@ function ToolRow({ tool, isPinned, activeCol, onSelect, onTogglePin, onResourceT
   );
 }
 
-function ItemList({ tool, items, fields, files, loading, onAdd }) {
+function ItemList({ tool, items, fields, files, loading, onAdd, onEdit, onDelete, saving }) {
   if (loading) {
     return (
       <div style={{ padding: 20, display: "flex", alignItems: "center", gap: 12 }}>
@@ -607,8 +936,11 @@ function ItemList({ tool, items, fields, files, loading, onAdd }) {
                 </div>
               ) : (
                 file.items.map((item, idx) => (
-                  <div key={idx} style={{ padding: "8px 20px 8px 32px", borderBottom: `1px solid ${T.border}` }}>
-                    <ItemSummary item={item} fields={fields} />
+                  <div key={idx} style={{ padding: "8px 20px 8px 32px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <ItemSummary item={item} fields={fields} />
+                    </div>
+                    <ItemActions item={item} idx={idx} filePath={file.path} onEdit={onEdit} onDelete={onDelete} saving={saving} />
                   </div>
                 ))
               )}
@@ -619,8 +951,11 @@ function ItemList({ tool, items, fields, files, loading, onAdd }) {
         <EmptyFileList />
       ) : (
         items.map((item, idx) => (
-          <div key={idx} style={{ padding: "10px 20px", borderBottom: `1px solid ${T.border}` }}>
-            <ItemSummary item={item} fields={fields} />
+          <div key={idx} style={{ padding: "10px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <ItemSummary item={item} fields={fields} />
+            </div>
+            <ItemActions item={item} idx={idx} filePath={null} onEdit={onEdit} onDelete={onDelete} saving={saving} />
           </div>
         ))
       )}
@@ -664,6 +999,47 @@ function ItemSummary({ item, fields }) {
           +{fields.length - 3} more
         </span>
       )}
+    </div>
+  );
+}
+
+function ItemActions({ item, idx, filePath, onEdit, onDelete, saving }) {
+  return (
+    <div style={{ display: "flex", gap: 4, flexShrink: 0, marginLeft: 12 }}>
+      <button
+        onClick={() => onEdit(item, filePath, idx)}
+        disabled={saving}
+        style={{
+          background: `${T.amber}12`,
+          border: `1px solid ${T.amber}33`,
+          borderRadius: 4,
+          color: T.amber,
+          cursor: saving ? "not-allowed" : "pointer",
+          fontSize: 10,
+          fontFamily: "'JetBrains Mono'",
+          padding: "3px 10px",
+          opacity: saving ? 0.5 : 1,
+        }}
+      >
+        Edit
+      </button>
+      <button
+        onClick={() => onDelete(item, filePath, idx)}
+        disabled={saving}
+        style={{
+          background: `${T.red}10`,
+          border: `1px solid ${T.red}33`,
+          borderRadius: 4,
+          color: T.red,
+          cursor: saving ? "not-allowed" : "pointer",
+          fontSize: 10,
+          fontFamily: "'JetBrains Mono'",
+          padding: "3px 10px",
+          opacity: saving ? 0.5 : 1,
+        }}
+      >
+        Delete
+      </button>
     </div>
   );
 }

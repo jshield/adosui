@@ -11,3 +11,4 @@ export { TabBar }                              from "./TabBar";
 export { Rail }                                from "./Rail";
 export { WorkerStatusView }                    from "./WorkerStatusView";
 export { YamlToolsView }                      from "./YamlToolsView";
+export { WorkflowTemplateSelector }            from "./WorkflowTemplateSelector";

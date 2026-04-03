@@ -6,6 +6,7 @@ import { getType, getId, getDisplayProps, getCollectionTypes } from "../../lib/r
 import { search as resourceSearch, fetchAll, fetchForProjects } from "../../lib/resourceApi";
 import { useCollectionData } from "../../lib/useCollectionData";
 import { ResourceDetail } from "./ResourceDetail";
+import { WorkflowProgress } from "./WorkflowProgress";
 import { TabBar } from "./TabBar";
 import {
   Pill, Card, Spinner, CommentThread, ProjectScopeSelector,
@@ -48,6 +49,7 @@ export function CollectionView({
   onSaveLogComments,
   syncStatus,
   linkRules,
+  workflowTemplates,
 }) {
   const { fetchedItems, loading } = useCollectionData(collection, client);
   const searchTokenRef = useRef(0);
@@ -150,6 +152,11 @@ export function CollectionView({
                 {dp.status && <Pill label={dp.status.label} color={dp.status.color} />}
               </div>
               {dp.subtitle && <div style={{ fontSize: 11, color: T.dim, fontFamily: "'JetBrains Mono'", marginTop: 4 }}>{dp.subtitle}</div>}
+              {rt.id === "workitem" && workflowTemplates && (
+                <div style={{ marginTop: 6 }}>
+                  <WorkflowProgress workItem={item} workflowTemplates={workflowTemplates} />
+                </div>
+              )}
               {rt.collectionShape !== "flat" && onAddComment && (
                 <div style={{ marginTop: 6 }}>
                   <CommentThread
@@ -378,6 +385,7 @@ export function CollectionView({
               onAddComment={onAddComment}
               onSaveLogComments={onSaveLogComments}
               syncStatus={syncStatus}
+              workflowTemplates={workflowTemplates}
             />
           </div>
         ))}

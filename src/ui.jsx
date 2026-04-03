@@ -4,6 +4,7 @@ import { ADOClient } from "./lib/adoClient";
 import { ADOStorage, PINNED_PIPELINES_ID, PINNED_TOOLS_ID, ConflictError, migrateCollection } from "./lib/adoStorage";
 import { syncCollectionToWiki } from "./lib/wikiSync";
 import { loadLinkRules } from "./lib/linkRules";
+import { loadWorkflowTemplates } from "./lib/workflowManager";
 import { loadResourceTypes, getType, getSearchableTypes, getId, getDisplayProps, toggleInCollection, addCommentToCollection, mapItemToCollection } from "./lib/resourceTypes";
 import { search as resourceSearch, fetchAll, fetchForProjects } from "./lib/resourceApi";
 import {
@@ -74,6 +75,9 @@ export default function App() {
   // Link rules (regex classification for bookmarked URLs)
   const [linkRules, setLinkRules] = useState({ rules: [], objectId: null });
 
+  // Workflow templates
+  const [workflowTemplates, setWorkflowTemplates] = useState({ templates: [], byId: new Map(), objectId: null });
+
   // Resource types registry
   const [resourceTypesLoaded, setResourceTypesLoaded] = useState(false);
   const saveTimerRef  = useRef(null);
@@ -116,8 +120,9 @@ export default function App() {
           ]);
           setCollections(cols);
           setLinkRules(rules);
-          // Load resource types (non-blocking)
+          // Load resource types and workflow templates (non-blocking)
           loadResourceTypes(c, cfg).then(() => setResourceTypesLoaded(true)).catch(() => {});
+          loadWorkflowTemplates(c, cfg).then(setWorkflowTemplates).catch(() => {});
           setSyncStatus("idle");
         } catch (e) {
           setSyncStatus("error");
@@ -153,8 +158,9 @@ export default function App() {
         ]);
         setCollections(cols);
         setLinkRules(rules);
-        // Load resource types (non-blocking)
+        // Load resource types and workflow templates (non-blocking)
         loadResourceTypes(client, cfg).then(() => setResourceTypesLoaded(true)).catch(() => {});
+        loadWorkflowTemplates(client, cfg).then(setWorkflowTemplates).catch(() => {});
         setSyncStatus("idle");
       } catch (e) {
         setSyncStatus("error");
@@ -595,8 +601,9 @@ export default function App() {
               ]);
               setCollections(cols);
               setLinkRules(rules);
-              // Load resource types (non-blocking)
+              // Load resource types and workflow templates (non-blocking)
               loadResourceTypes(c, cfg).then(() => setResourceTypesLoaded(true)).catch(() => {});
+              loadWorkflowTemplates(c, cfg).then(setWorkflowTemplates).catch(() => {});
               setSyncStatus("idle");
             } catch (e) {
               setSyncStatus("error");
@@ -742,6 +749,7 @@ export default function App() {
                 onSaveLogComments={handleSaveLogComments}
                 syncStatus={syncStatus}
                 linkRules={linkRules}
+                workflowTemplates={workflowTemplates}
               />
             ) : (
               <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, color: T.dim }}>

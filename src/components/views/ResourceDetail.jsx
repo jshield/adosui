@@ -87,13 +87,15 @@ marked.setOptions({
 });
 
 import { getType } from "../../lib/resourceTypes";
+import { WorkflowSection } from "./WorkflowSection";
+import { getWorkflowTemplateId } from "../../lib/workflowManager";
 
-export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, onSaveLogComments, syncStatus }) {
+export function ResourceDetail({ client, resource, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, onSaveLogComments, syncStatus, workflowTemplates }) {
   const { type, data } = resource;
 
   // Custom detail components for built-in types
   if (type === "workitem") {
-    return <WorkItemDetail client={client} workItem={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
+    return <WorkItemDetail client={client} workItem={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} workflowTemplates={workflowTemplates} />;
   }
   if (type === "repo") {
     return <RepoDetail client={client} repo={data} org={org} collection={collection} profile={profile} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} onAddComment={onAddComment} syncStatus={syncStatus} />;
@@ -158,7 +160,7 @@ function GenericResourceDetail({ rt, item, org, collection, profile, onResourceT
   );
 }
 
-function WorkItemDetail({ client, workItem, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, syncStatus }) {
+function WorkItemDetail({ client, workItem, org, collection, profile, onResourceToggle, onWorkItemToggle, onAddComment, syncStatus, workflowTemplates }) {
   const [wiComments, setWiComments] = useState([]);
   const [wiCommentsLoading, setWiCommentsLoading] = useState(false);
 
@@ -252,6 +254,17 @@ function WorkItemDetail({ client, workItem, org, collection, profile, onResource
               />
             )}
           </div>
+        )}
+
+        {workflowTemplates && getWorkflowTemplateId(workItem) && (
+          <WorkflowSection
+            client={client}
+            workItem={workItem}
+            profile={profile}
+            org={org}
+            workflowTemplates={workflowTemplates}
+            showToast={() => {}}
+          />
         )}
       </div>
     </div>

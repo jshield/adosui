@@ -24,7 +24,7 @@ export class ADOClient {
   _getHeaders(opts = {}) {
     const headers = {
       "Authorization": this._auth,
-      "Content-Type": "application/json",
+      "Content-Type": opts.contentType || "application/json",
       "Accept": "application/json",
     };
     return headers;
@@ -840,5 +840,144 @@ export class ADOClient {
       body: JSON.stringify({ text }),
     });
     return r;
+  }
+
+  // ── Work Item CRUD (for workflows) ─────────────────────────────────────────
+
+  /**
+   * Create a child work item linked to a parent via hierarchy relation.
+   * Uses the JSON Patch content type required by the WI PATCH API.
+   */
+  async createChildWorkItem(project, parentId, type, title, description, fields = {}) {
+    const ops = [
+      { op: "add", path: "/fields/System.Title", value: title },
+    ];
+    if (description) {
+      ops.push({ op: "add", path: "/fields/System.Description", value: description });
+    }
+    for (const [key, val] of Object.entries(fields)) {
+      ops.push({ op: "add", path: `/fields/${key}`, value: val });
+    }
+    // Link to parent
+    ops.push({
+      op: "add",
+      path: "/relations/-",
+      value: {
+        rel: "System.LinkTypes.Hierarchy-Reverse",
+        url: `${this.base}/${encodeURIComponent(project)}/_apis/wit/workItems/${parentId}`,
+      },
+    });
+
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/wit/workitems/$${encodeURIComponent(type)}?api-version=7.1`,
+      {
+        method: "PATCH",
+        contentType: "application/json-patch+json",
+        body: JSON.stringify(ops),
+      }
+    );
+  }
+
+  /**
+   * Get child work items of a parent via WIQL.
+   */
+  async getChildWorkItems(project, parentId) {
+    const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.Parent] = ${parentId}`;
+    const r = await this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.1`,
+      { method: "POST", body: JSON.stringify({ query: wiql }) }
+    );
+    if (!r.workItems?.length) return [];
+    const ids = r.workItems.map(w => w.id).join(",");
+    const fields = [
+      "System.Id","System.Title","System.WorkItemType","System.State",
+      "System.AssignedTo","System.Tags","System.ChangedDate",
+    ].join(",");
+    const detail = await this._fetch(
+      `${this.base}/_apis/wit/workitems?ids=${ids}&fields=${fields}&api-version=7.1`
+    );
+    return detail.value || [];
+  }
+
+  /**
+   * Update a work item field via JSON Patch.
+   */
+  async updateWorkItemField(project, wiId, field, value) {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/wit/workitems/${wiId}?api-version=7.1`,
+      {
+        method: "PATCH",
+        contentType: "application/json-patch+json",
+        body: JSON.stringify([{ op: "replace", path: `/fields/${field}`, value }]),
+      }
+    );
+  }
+
+  /**
+   * Update a work item's state.
+   */
+  async updateWorkItemState(project, wiId, newState) {
+    return this.updateWorkItemField(project, wiId, "System.State", newState);
+  }
+
+  /**
+   * Add a tag to a work item.
+   */
+  async addWorkItemTag(project, wiId, tag) {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/wit/workitems/${wiId}/tags/${encodeURIComponent(tag)}?api-version=7.1`,
+      { method: "POST" }
+    );
+  }
+
+  /**
+   * Get a work item with its relations (parent/child links).
+   */
+  async getWorkItemWithRelations(project, wiId) {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/wit/workitems/${wiId}?$expand=relations&api-version=7.1`
+    );
+  }
+
+  // ── Pipeline Run & Approvals ───────────────────────────────────────────────
+
+  /**
+   * Trigger a pipeline run with optional template parameters.
+   */
+  async runPipeline(project, pipelineId, templateParameters = {}) {
+    const body = {};
+    if (Object.keys(templateParameters).length) {
+      body.templateParameters = templateParameters;
+    }
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/pipelines/${encodeURIComponent(pipelineId)}/runs?api-version=7.1`,
+      { method: "POST", body: JSON.stringify(body) }
+    );
+  }
+
+  /**
+   * Get pending approvals for the current user.
+   */
+  async getPendingApprovals(project) {
+    try {
+      const url = project
+        ? `${this.base}/${encodeURIComponent(project)}/_apis/pipelines/approvals?statusFilter=pending&api-version=7.1`
+        : `${this.base}/_apis/pipelines/approvals?statusFilter=pending&api-version=7.1`;
+      const r = await this._fetch(url);
+      return r.value || [];
+    } catch { return []; }
+  }
+
+  /**
+   * Respond to a pipeline approval (approve or reject).
+   */
+  async respondToApproval(project, approvalId, status, comment = "") {
+    return this._fetch(
+      `${this.base}/${encodeURIComponent(project)}/_apis/pipelines/approvals/${encodeURIComponent(approvalId)}?api-version=7.1`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status, comment }),
+      }
+    );
   }
 }

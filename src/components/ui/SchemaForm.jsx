@@ -23,20 +23,28 @@ import { Btn, formLabelStyle } from "./index";
  * @param {boolean} [props.disabled=false]
  * @param {object} [props.context] - Arbitrary data passed to optionsSource/visibleWhen callbacks
  */
-export function SchemaForm({ fields, onSubmit, onCancel, submitLabel = "Submit", disabled = false, context }) {
+export function SchemaForm({ fields, onSubmit, onCancel, submitLabel = "Submit", disabled = false, context, values: externalValues, onChange: onExternalChange, noButtons }) {
   const initialise = useCallback(() => buildDefault(fields), [fields]);
 
-  const [values, setValues] = useState(initialise);
+  const [internalValues, setInternalValues] = useState(initialise);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
+
+  // Controlled mode: use external values when provided, otherwise internal state
+  const values = externalValues !== undefined ? externalValues : internalValues;
 
   // Filter fields by visibleWhen callback
   const visibleFields = fields.filter(f => !f.visibleWhen || f.visibleWhen(values));
 
   const setValue = useCallback((key, val) => {
-    setValues(prev => ({ ...prev, [key]: val }));
+    const next = { ...values, [key]: val };
+    if (externalValues !== undefined) {
+      onExternalChange(next);
+    } else {
+      setInternalValues(next);
+    }
     setErrors(prev => ({ ...prev, [key]: undefined }));
-  }, []);
+  }, [values, externalValues, onExternalChange]);
 
   const handleBlur = useCallback((key) => {
     setTouched(prev => ({ ...prev, [key]: true }));
@@ -75,14 +83,16 @@ export function SchemaForm({ fields, onSubmit, onCancel, submitLabel = "Submit",
           context={context}
         />
       ))}
-      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-        <Btn variant="primary" onClick={handleSubmit} disabled={disabled}>
-          {submitLabel}
-        </Btn>
-        {onCancel && (
-          <Btn onClick={onCancel} disabled={disabled}>Cancel</Btn>
-        )}
-      </div>
+      {!noButtons && (
+        <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+          <Btn variant="primary" onClick={handleSubmit} disabled={disabled}>
+            {submitLabel}
+          </Btn>
+          {onCancel && (
+            <Btn onClick={onCancel} disabled={disabled}>Cancel</Btn>
+          )}
+        </div>
+      )}
     </div>
   );
 }

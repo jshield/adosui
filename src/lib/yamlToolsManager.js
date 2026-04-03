@@ -427,6 +427,127 @@ export async function writeYamlArrayItem(client, project, repoId, filePath, arra
   }
 }
 
+/**
+ * Update an existing item in a YAML array file.
+ *
+ * @param {object} client
+ * @param {string} project
+ * @param {string} repoId
+ * @param {string} filePath
+ * @param {string} arrayPath - Dot-notation path to the array within the file (e.g. "rules" or "data.items")
+ * @param {object} updatedItem - The updated item data
+ * @param {string|number} matchKey - Item id or array index to match
+ * @param {string|null} objectId - Current file objectId (for concurrency)
+ * @param {string} branch - Target branch
+ * @param {string} commitMessage
+ * @param {object} author - { displayName, emailAddress }
+ * @returns {Promise<string|null>} New objectId
+ */
+export async function writeYamlArrayUpdate(client, project, repoId, filePath, arrayPath, updatedItem, matchKey, objectId, branch, commitMessage, author) {
+  const { items, raw } = await readYamlArray(client, project, repoId, filePath, arrayPath, branch);
+
+  let newItems;
+  if (typeof matchKey === "number") {
+    if (matchKey >= 0 && matchKey < items.length) {
+      newItems = [...items];
+      newItems[matchKey] = updatedItem;
+    } else {
+      throw new Error(`Index ${matchKey} out of bounds for array of ${items.length} items`);
+    }
+  } else {
+    const idx = items.findIndex(i => i && (i.id === matchKey || i.name === matchKey));
+    if (idx === -1) throw new Error(`Item with id "${matchKey}" not found`);
+    newItems = [...items];
+    newItems[idx] = updatedItem;
+  }
+
+  let newContent;
+  if (!arrayPath) {
+    newContent = yaml.dump(newItems, { lineWidth: 120, quotingType: '"' });
+  } else {
+    const result = JSON.parse(JSON.stringify(raw));
+    let target = result;
+    const parts = arrayPath.split(".");
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (target[parts[i]] == null || typeof target[parts[i]] !== "object") {
+        target[parts[i]] = {};
+      }
+      target[parts[i]] = { ...target[parts[i]] };
+      target = target[parts[i]];
+    }
+    target[parts[parts.length - 1]] = newItems;
+    newContent = yaml.dump(result, { lineWidth: 120, quotingType: '"' });
+  }
+
+  await client.pushGitFile(project, repoId, filePath, newContent, objectId, commitMessage, author?.displayName, author?.emailAddress, branch);
+
+  try {
+    const refreshed = await client.readGitFile(project, repoId, filePath, branch);
+    return refreshed?.objectId || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete an item from a YAML array file.
+ *
+ * @param {object} client
+ * @param {string} project
+ * @param {string} repoId
+ * @param {string} filePath
+ * @param {string} arrayPath - Dot-notation path to the array
+ * @param {string|number} matchKey - Item id or array index to match
+ * @param {string|null} objectId - Current file objectId
+ * @param {string} branch - Target branch
+ * @param {string} commitMessage
+ * @param {object} author - { displayName, emailAddress }
+ * @returns {Promise<string|null>} New objectId
+ */
+export async function writeYamlArrayDelete(client, project, repoId, filePath, arrayPath, matchKey, objectId, branch, commitMessage, author) {
+  const { items, raw } = await readYamlArray(client, project, repoId, filePath, arrayPath, branch);
+
+  let newItems;
+  if (typeof matchKey === "number") {
+    if (matchKey >= 0 && matchKey < items.length) {
+      newItems = items.filter((_, i) => i !== matchKey);
+    } else {
+      throw new Error(`Index ${matchKey} out of bounds for array of ${items.length} items`);
+    }
+  } else {
+    const before = items.length;
+    newItems = items.filter(i => !(i && (i.id === matchKey || i.name === matchKey)));
+    if (newItems.length === before) throw new Error(`Item with id "${matchKey}" not found`);
+  }
+
+  let newContent;
+  if (!arrayPath) {
+    newContent = yaml.dump(newItems, { lineWidth: 120, quotingType: '"' });
+  } else {
+    const result = JSON.parse(JSON.stringify(raw));
+    let target = result;
+    const parts = arrayPath.split(".");
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (target[parts[i]] == null || typeof target[parts[i]] !== "object") {
+        target[parts[i]] = {};
+      }
+      target[parts[i]] = { ...target[parts[i]] };
+      target = target[parts[i]];
+    }
+    target[parts[parts.length - 1]] = newItems;
+    newContent = yaml.dump(result, { lineWidth: 120, quotingType: '"' });
+  }
+
+  await client.pushGitFile(project, repoId, filePath, newContent, objectId, commitMessage, author?.displayName, author?.emailAddress, branch);
+
+  try {
+    const refreshed = await client.readGitFile(project, repoId, filePath, branch);
+    return refreshed?.objectId || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Branch helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -654,4 +775,26 @@ export const BUILT_IN_LINK_RULES = {
   branch: { prefix: "link-rules/" },
   commitMessageTemplate: "Update link rule {field:id}",
   _isBuiltIn: true,
+};
+
+// ── Built-in tool: Workflow Builder ──────────────────────────────────────────────
+
+/**
+ * Built-in tool for managing workflow templates.
+ * Stores templates in collections/workflow-templates.yaml in the config repo.
+ */
+export const BUILT_IN_WORKFLOW_BUILDER = {
+  id:   "__workflow-builder__",
+  name: "Workflow Builder",
+  description: "Create and edit workflow templates with tracks, steps, and actions",
+  icon: "⚡",
+  target: {
+    file:      "collections/workflow-templates.yaml",
+    arrayPath: "templates",
+  },
+  schema: { fields: [] },
+  branch: { prefix: "workflow-builder/" },
+  commitMessageTemplate: "Update workflow templates",
+  _isBuiltIn: true,
+  _isWorkflowBuilder: true,
 };
