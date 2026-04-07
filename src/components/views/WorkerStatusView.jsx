@@ -3,7 +3,6 @@ import { T } from "../../lib/theme";
 import backgroundWorker from "../../lib/backgroundWorker";
 import { getWorkerTypes } from "../../lib/resourceTypes";
 
-// Build resource labels from registry + legacy entries
 function buildResourceLabels() {
   const labels = {
     repos: "Repos",
@@ -44,6 +43,96 @@ function StatusDot({ status }) {
   );
 }
 
+function ProgressBar({ percent }) {
+  return (
+    <div style={{ width: 50, height: 3, background: T.dimmer, borderRadius: 2 }}>
+      <div style={{ 
+        width: `${percent || 0}%`, height: '100%', 
+        background: T.cyan, borderRadius: 2, transition: 'width 0.2s' 
+      }} />
+    </div>
+  );
+}
+
+function RequestRow({ request, isInFlight }) {
+  const { type, params, priority, progress, retry, key } = request;
+  
+  const priorityBadge = {
+    user: { label: 'USER', color: T.cyan },
+    background: { label: 'BG', color: T.dim },
+  }[priority] || { label: 'BG', color: T.dim };
+  
+  const isSearch = type.startsWith('search:');
+  const displayType = isSearch ? type : type;
+  let displayParams = '';
+  
+  if (params?.query) {
+    displayParams = `"${params.query}"`;
+  } else if (params?.ids?.length) {
+    displayParams = `${params.ids.length} items`;
+  } else if (params?.projects?.length) {
+    displayParams = params.projects.join(', ');
+  } else if (params?.project) {
+    displayParams = params.project;
+  }
+  
+  return (
+    <div style={{ 
+      display: "flex", alignItems: "center", gap: 8, fontSize: 11,
+      padding: "4px 16px", borderBottom: `1px solid ${T.border}22`
+    }}>
+      <span style={{
+        fontSize: 8, fontFamily: "'JetBrains Mono'", padding: "1px 4px",
+        borderRadius: 2, background: `${priorityBadge.color}18`, color: priorityBadge.color,
+      }}>
+        {priorityBadge.label}
+      </span>
+      <span style={{ color: T.text, fontFamily: "'Barlow'", width: 130, flexShrink: 0 }}>
+        {displayType}
+      </span>
+      <span style={{ color: T.dim, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+        {displayParams}
+      </span>
+      
+      {progress?.currentProject && (
+        <span style={{ fontSize: 9, color: T.dim, width: 100, overflow: "hidden", textOverflow: "ellipsis" }}>
+          {progress.currentProject}
+        </span>
+      )}
+      
+      {progress && (
+        <ProgressBar percent={progress.percent} />
+      )}
+      
+      {retry > 0 && (
+        <span style={{ fontSize: 9, color: T.amber }}>retry {retry}</span>
+      )}
+      
+      {isInFlight && !progress && (
+        <span style={{ color: T.dim, fontSize: 10 }}>⟳</span>
+      )}
+    </div>
+  );
+}
+
+function RequestSection({ title, requests, isInFlight }) {
+  if (!requests?.length) return null;
+  
+  return (
+    <div style={{ borderBottom: `1px solid ${T.border}` }}>
+      <div style={{ 
+        padding: "8px 16px", fontSize: 9, fontFamily: "'JetBrains Mono'", color: T.dim, 
+        letterSpacing: "0.1em", textTransform: "uppercase", background: `${T.dimmer}08`
+      }}>
+        {title} ({requests.length})
+      </div>
+      {requests.map((req, i) => (
+        <RequestRow key={req.key || i} request={req} isInFlight={isInFlight} />
+      ))}
+    </div>
+  );
+}
+
 function ProjectRow({ name, status }) {
   const [expanded, setExpanded] = useState(false);
   const resources = status.resources || {};
@@ -61,12 +150,10 @@ function ProjectRow({ name, status }) {
         onMouseEnter={e => { if (hasError) e.currentTarget.style.background = "rgba(255,255,255,0.02)"; }}
         onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
       >
-        {/* Project name */}
         <span style={{ width: 160, flexShrink: 0, color: T.heading, fontFamily: "'Barlow'", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {name}
         </span>
 
-        {/* Scoped badge */}
         <span style={{
           fontSize: 9, fontFamily: "'JetBrains Mono'", padding: "1px 5px", borderRadius: 3,
           background: status.scoped ? `${T.violet}18` : `${T.dimmer}20`,
@@ -75,12 +162,10 @@ function ProjectRow({ name, status }) {
           {status.scoped ? "scoped" : "org"}
         </span>
 
-        {/* Last refresh */}
         <span style={{ width: 70, flexShrink: 0, fontSize: 10, fontFamily: "'JetBrains Mono'", color: T.dim, textAlign: "right" }}>
           {timeAgo(status.lastRefresh)}
         </span>
 
-        {/* Resource status dots */}
         <div style={{ display: "flex", gap: 10, flexShrink: 0, marginLeft: 8 }}>
           {Object.entries(RESOURCE_LABELS).map(([key, label]) => {
             const r = resources[key];
@@ -92,13 +177,11 @@ function ProjectRow({ name, status }) {
           })}
         </div>
 
-        {/* Expand indicator */}
         {hasError && (
           <span style={{ fontSize: 9, color: T.dim, marginLeft: "auto", transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▶</span>
         )}
       </div>
 
-      {/* Expanded error details */}
       {expanded && hasError && (
         <div style={{ padding: "2px 16px 8px 196px", fontSize: 10, fontFamily: "'JetBrains Mono'" }}>
           {Object.entries(RESOURCE_LABELS).map(([key, label]) => {
@@ -127,15 +210,25 @@ export function WorkerStatusView({ collections }) {
     projectStatus: {},
     projects: [],
     scopedProjectNames: new Set(),
+    inFlight: [],
+    requestQueue: [],
   });
 
   useEffect(() => {
-    return backgroundWorker.subscribe(setState);
+    return backgroundWorker.subscribe((workerState) => {
+      setState(prev => ({
+        ...prev,
+        ...workerState,
+      }));
+    });
   }, []);
 
-  const { projectStatus, isRunning, isLeader, lastRefresh, lastPipelineRunsRefresh, activityLog, projects, scopedProjectNames } = state;
+  const { 
+    projectStatus, isRunning, isLeader, lastRefresh, 
+    activityLog, projects, scopedProjectNames, 
+    inFlight, requestQueue 
+  } = state;
 
-  // Merge all projects with status data; unsynced projects show as pending
   const EMPTY_RESOURCES = {
     repos: { status: "pending", error: null, timestamp: null },
     pipelines: { status: "pending", error: null, timestamp: null },
@@ -156,7 +249,6 @@ export function WorkerStatusView({ collections }) {
     }];
   });
 
-  // Sort: scoped first, then by last refresh desc, then alphabetically
   const sorted = allEntries.sort(([aName, a], [bName, b]) => {
     if (a.scoped !== b.scoped) return a.scoped ? -1 : 1;
     const aTime = a.lastRefresh ? new Date(a.lastRefresh).getTime() : 0;
@@ -172,7 +264,6 @@ export function WorkerStatusView({ collections }) {
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      {/* Header */}
       <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <span style={{ fontSize: 14 }}>◉</span>
@@ -191,7 +282,6 @@ export function WorkerStatusView({ collections }) {
           {lastRefresh && <span>Last batch: {timeAgo(lastRefresh)}</span>}
         </div>
 
-        {/* Legend */}
         <div style={{ display: "flex", gap: 12, marginTop: 10, fontSize: 9, fontFamily: "'JetBrains Mono'", color: T.dim }}>
           {Object.entries(RESOURCE_LABELS).map(([key, label]) => (
             <div key={key} style={{ display: "flex", alignItems: "center", gap: 3 }}>
@@ -200,9 +290,47 @@ export function WorkerStatusView({ collections }) {
             </div>
           ))}
         </div>
+
+        {/* Test buttons */}
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button 
+            onClick={() => backgroundWorker.request('pipelines', { projects: ['test-project'], priority: 'user' })}
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, padding: "4px 8px", cursor: "pointer", color: T.text, fontSize: 9 }}
+          >
+            Test: pipelines
+          </button>
+          <button 
+            onClick={() => backgroundWorker.request('repos', { projects: ['test-project'], priority: 'user' })}
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, padding: "4px 8px", cursor: "pointer", color: T.text, fontSize: 9 }}
+          >
+            Test: repos
+          </button>
+          <button 
+            onClick={() => backgroundWorker.request('pipelineRuns', { project: 'test-project', pipelineIds: [1,2,3], priority: 'user' })}
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, padding: "4px 8px", cursor: "pointer", color: T.text, fontSize: 9 }}
+          >
+            Test: runs
+          </button>
+          <button 
+            onClick={() => backgroundWorker.request('search:workitem', { query: 'test', projects: ['test-project'], priority: 'user' })}
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, padding: "4px 8px", cursor: "pointer", color: T.text, fontSize: 9 }}
+          >
+            Test: search
+          </button>
+        </div>
       </div>
 
-      {/* Project list */}
+      {/* In-Flight + Queue Section - always visible for debugging */}
+      <div style={{ maxHeight: 250, overflowY: "auto", borderBottom: `1px solid ${T.border}`, background: `${T.dimmer}05` }}>
+        <RequestSection title="In Flight" requests={inFlight} isInFlight={true} />
+        <RequestSection title="Queued" requests={requestQueue} isInFlight={false} />
+        {inFlight.length === 0 && requestQueue.length === 0 && (
+          <div style={{ padding: "8px 16px", fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'" }}>
+            No active requests (click test buttons above to debug)
+          </div>
+        )}
+      </div>
+
       <div style={{ flex: 1, overflowY: "auto" }}>
         {sorted.length === 0 ? (
           <div style={{ padding: 40, textAlign: "center", color: T.dimmer, fontSize: 12, fontFamily: "'JetBrains Mono'" }}>
@@ -215,7 +343,6 @@ export function WorkerStatusView({ collections }) {
         )}
       </div>
 
-      {/* Activity log */}
       <div style={{ borderTop: `1px solid ${T.border}`, maxHeight: 120, overflowY: "auto", flexShrink: 0 }}>
         <div style={{ padding: "6px 16px", fontSize: 9, fontFamily: "'JetBrains Mono'", color: T.dim, letterSpacing: "0.1em", textTransform: "uppercase" }}>
           Activity Log

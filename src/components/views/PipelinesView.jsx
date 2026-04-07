@@ -1,22 +1,11 @@
 import { useState, useCallback, useEffect } from "react";
 import { T } from "../../lib/theme";
 import { Dot, SelectableRow, Field } from "../ui";
-import { timeAgo, pipelineStatus, branchName, pipelineUrl, cache, getLatestRun, getRunBranch, getRunStatusVal } from "../../lib";
+import { timeAgo, pipelineStatus, branchName, pipelineUrl, getLatestRun, getRunBranch, getRunStatusVal } from "../../lib";
 import backgroundWorker from "../../lib/backgroundWorker";
 import { ResourceDetail } from "./ResourceDetail";
 
-/**
- * PipelinesView
- *
- * Props:
- *   client            – ADOClient
- *   org               – string
- *   pinnedCollection  – the personal "pinned-pipelines" collection object
- *                       ({ pipelines: [{ id, name, project, folder, configurationType, comments }] })
- *   onTogglePin       – (pipeline) => void  called with the full ADO pipeline object
- */
 export function PipelinesView({ client, org, pinnedCollection, onTogglePin, profile, onResourceToggle, onAddComment, onSaveLogComments, syncStatus }) {
-  // Derive the pinned list from the collection's pipelines array
   const pinnedPipelines = pinnedCollection?.pipelines || [];
 
   const [allPipelines, setAllPipelines] = useState([]);
@@ -27,141 +16,101 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
   const [searchQuery, setSearchQuery] = useState("");
   const [lastRunsRefresh, setLastRunsRefresh] = useState(null);
 
-  const fetchPipelines = useCallback(async () => {
+  const allProjects = [...new Set(pinnedPipelines.map(p => p.project).filter(Boolean))];
+
+  // Request pipelines from worker — worker handles cache check internally
+  useEffect(() => {
+    if (!client) return;
     setLoading(true);
-    try {
-      const pipelines = await client.getAllPipelines();
-      setAllPipelines(pipelines);
-    } catch (e) {
-      console.error("Failed to fetch pipelines:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [client]);
 
+    if (allProjects.length > 0) {
+      backgroundWorker.request('pipelines', { projects: allProjects, priority: 'user' });
+    } else {
+      backgroundWorker.request('pipelines', { priority: 'user' });
+    }
+  }, [client, allProjects.join(',')]);
+
+  // Subscribe to worker state for pipeline data — no cache knowledge
+  useEffect(() => {
+    const unsub = backgroundWorker.subscribe((state) => {
+      const projects = allProjects.length > 0 ? allProjects : [...(state.scopedProjectNames || [])];
+      const pipelines = backgroundWorker.getPipelines(projects);
+      if (pipelines.length > 0) {
+        setAllPipelines(pipelines);
+        setLoading(false);
+      }
+    });
+
+    return unsub;
+  }, [allProjects.join(',')]);
+
+  // Fetch runs using worker — worker handles cache check internally
   const fetchRuns = useCallback(async () => {
-    if (!allPipelines.length || !pinnedPipelines.length) return;
-    setRefreshing(true);
-    try {
-      // Read cached runs produced by the background worker for each pipeline's project
-      const runsMap = { ...pipelineRuns };
-      await Promise.all(pinnedPipelines.map(async (p) => {
-        try {
-          const pipeline = allPipelines.find(pl => String(pl.id) === String(p.id));
-          const projectName = p.project || pipeline?._projectName;
-          if (!projectName) { runsMap[String(p.id)] = []; return; }
-
-          const cached = cache.get(`project:${projectName}:pipelineRuns`) || {};
-          // Normalize key lookup to strings
-          if (cached && Object.prototype.hasOwnProperty.call(cached, String(p.id))) {
-            runsMap[String(p.id)] = cached[String(p.id)] || [];
-            return;
-          }
-
-          // Fallback: fetch builds directly (prefer builds endpoint)
-          let runs = [];
-          try {
-            runs = await client.getBuildRuns(projectName, p.id);
-          } catch (err) {
-            try { runs = await client.getPipelineRuns(projectName, p.id); } catch { runs = []; }
-          }
-          runsMap[String(p.id)] = runs || [];
-        } catch (err) {
-          runsMap[String(p.id)] = [];
-        }
-      }));
-      setPipelineRuns(runsMap);
-    } catch (e) {
-      console.error("Failed to fetch runs:", e);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [client, pinnedPipelines, allPipelines]);
-
-  useEffect(() => { fetchPipelines(); }, [fetchPipelines]);
-
-  // Manual refresh that batches builds requests for visible (pinned) pipelines
-  const handleManualRefresh = useCallback(async () => {
     if (!pinnedPipelines.length || !allPipelines.length) return;
     setRefreshing(true);
-    try {
-      // Group pinned pipelines by project so we can batch per-project requests
-      const byProject = {};
-      for (const p of pinnedPipelines) {
-        const pipeline = allPipelines.find(pl => String(pl.id) === String(p.id));
-        const projectName = p.project || pipeline?._projectName;
-        if (!projectName) continue;
-        byProject[projectName] = byProject[projectName] || [];
-        byProject[projectName].push(String(p.id));
-      }
 
-      const CHUNK_DEFS = 20;
-      const PER_DEF = 3;
-      const MANUAL_TTL = 60 * 1000; // match worker RUNS_TTL
-
-      for (const [projectName, defIds] of Object.entries(byProject)) {
-        const projectRunsMap = {};
-        for (let i = 0; i < defIds.length; i += CHUNK_DEFS) {
-          const chunk = defIds.slice(i, i + CHUNK_DEFS);
-          try {
-            const map = await client.getBuildRunsForDefinitions(projectName, chunk, PER_DEF);
-            for (const k of Object.keys(map)) projectRunsMap[String(k)] = map[k] || [];
-          } catch (e) {
-            // Fallback per-definition if batched call fails
-            await Promise.all(chunk.map(async (defId) => {
-              try {
-                let runs = await client.getBuildRuns(projectName, defId);
-                if (!runs || !runs.length) {
-                  runs = await client.getPipelineRuns(projectName, defId);
-                }
-                projectRunsMap[String(defId)] = runs || [];
-              } catch (err) {
-                projectRunsMap[String(defId)] = [];
-              }
-            }));
-          }
-        }
-        // Persist per-project pipeline runs into cache with same key the worker uses
-        cache.set(`project:${projectName}:pipelineRuns`, projectRunsMap, MANUAL_TTL);
-        // Merge newly cached runs into local state
-        const cached = cache.get(`project:${projectName}:pipelineRuns`) || {};
-        setPipelineRuns(prev => ({ ...prev, ...Object.fromEntries(Object.entries(cached).map(([k,v]) => [String(k), v || []])) }));
-      }
-
-      // Signal a refresh time so UI shows "Runs refreshed:"
-      try {
-        backgroundWorker.lastPipelineRunsRefresh = new Date().toISOString();
-        backgroundWorker.notify();
-      } catch (e) {}
-    } catch (e) {
-      console.error("Manual refresh failed:", e);
-    } finally {
-      setRefreshing(false);
+    const byProject = {};
+    for (const p of pinnedPipelines) {
+      const pipeline = allPipelines.find(pl => String(pl.id) === String(p.id));
+      const projectName = p.project || pipeline?._projectName;
+      if (!projectName) continue;
+      byProject[projectName] = byProject[projectName] || [];
+      byProject[projectName].push(String(p.id));
     }
-  }, [client, pinnedPipelines, allPipelines]);
 
-  // Subscribe to background worker: on runs refresh re-load cached runs for visible projects
+    for (const projectName of Object.keys(byProject)) {
+      backgroundWorker.request('pipelineRuns', {
+        project: projectName,
+        pipelineIds: byProject[projectName],
+        priority: 'user',
+      });
+    }
+    setRefreshing(false);
+  }, [pinnedPipelines, allPipelines]);
+
+  // Subscribe to worker state for pipeline runs — no cache knowledge
+  useEffect(() => {
+    const unsub = backgroundWorker.subscribe((state) => {
+      const projects = allProjects.length > 0 ? allProjects : [...(state.scopedProjectNames || [])];
+      const runsMap = {};
+      for (const project of projects) {
+        const runs = backgroundWorker.getPipelineRuns(project);
+        Object.assign(runsMap, runs);
+      }
+      if (Object.keys(runsMap).length > 0) {
+        setPipelineRuns(prev => {
+          const updated = { ...prev };
+          for (const [k, v] of Object.entries(runsMap)) {
+            updated[String(k)] = v;
+          }
+          return updated;
+        });
+      }
+    });
+
+    return unsub;
+  }, [allProjects.join(',')]);
+
+  // Subscribe to worker for refresh timestamps
   useEffect(() => {
     const unsub = backgroundWorker.subscribe((st) => {
       setLastRunsRefresh(st.lastPipelineRunsRefresh || null);
-      // Re-read cache for projects present in allPipelines
-      const projects = Array.from(new Set(allPipelines.map(p => p._projectName).filter(Boolean)));
-      for (const projectName of projects) {
-        const cached = cache.get(`project:${projectName}:pipelineRuns`) || {};
-        // Merge into local state
-        setPipelineRuns(prev => ({ ...prev, ...Object.fromEntries(Object.entries(cached).map(([k,v]) => [String(k), v || []])) }));
-      }
     });
     return unsub;
-  }, [allPipelines]);
+  }, []);
 
+  // Initial runs fetch and periodic refresh via worker
   useEffect(() => {
-    if (allPipelines.length) {
+    if (allPipelines.length && pinnedPipelines.length) {
       fetchRuns();
-      const interval = setInterval(fetchRuns, 30000);
-      return () => clearInterval(interval);
     }
-  }, [allPipelines.length, pinnedPipelines.length, fetchRuns]);
+  }, [allPipelines.length, pinnedPipelines.length]);
+
+  // Manual refresh triggers worker request
+  const handleManualRefresh = useCallback(async () => {
+    await fetchRuns();
+    setLastRunsRefresh(new Date().toISOString());
+  }, [fetchRuns]);
 
   const filteredPipelines = allPipelines.filter(p =>
     !searchQuery || p.name?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -187,7 +136,7 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
           <>
             <div style={{ padding: "8px 14px", fontSize: 10, color: T.amber, background: "rgba(245,158,11,0.05)", borderBottom: `1px solid ${T.border}` }}>
               Pinned ({pinnedPipelines.length})
-              <button onClick={fetchRuns} disabled={refreshing} style={{ background: "none", border: "none", color: T.cyan, cursor: "pointer", float: "right" }}>
+              <button onClick={handleManualRefresh} disabled={refreshing} style={{ background: "none", border: "none", color: T.cyan, cursor: "pointer", float: "right" }}>
                 {refreshing ? "..." : "↻"}
               </button>
             </div>

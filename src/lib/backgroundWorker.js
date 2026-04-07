@@ -6,6 +6,8 @@ const TICK_INTERVAL = 2 * 60 * 1000;
 const BATCH_SIZE = 5;
 const CACHE_TTL = 5 * 60 * 1000;
 const RUNS_TTL = 60 * 1000; // 1 minute for latest pipeline runs
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [1000, 2000, 4000]; // 1s, 2s, 4s with jitter
 
 class BackgroundWorker {
   constructor() {
@@ -23,6 +25,12 @@ class BackgroundWorker {
     this.lastPipelineRunsRefresh = null;
     this.listeners = new Set();
     this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
+    
+    // Request queue and state
+    this._requestQueue = [];
+    this._inFlight = new Map();
+    this._progress = new Map();
+    this._processing = false;
   }
 
   setClient(client) {
@@ -98,7 +106,149 @@ class BackgroundWorker {
   }
 
   notify() {
-    this.listeners.forEach(cb => cb({
+    this.listeners.forEach(cb => cb(this.getState()));
+  }
+
+  // DATA GETTERS — read from cache internally, views use these instead of cache.get()
+
+  getPipelines(projects) {
+    const all = [];
+    for (const project of (projects || [])) {
+      const cached = cache.get(`worker:pipelines:${project}`);
+      if (cached) {
+        all.push(...(cached.items || cached.data?.items || cached.data || []));
+      }
+    }
+    return all;
+  }
+
+  getPipelineRuns(project) {
+    const cached = cache.get(`worker:pipelineRuns:${project}`);
+    if (!cached) return {};
+    return cached.items || cached.data?.items || cached.data || {};
+  }
+
+  getRepos(projects) {
+    const key = (projects || []).sort().join(',') || 'all';
+    const cached = cache.get(`worker:repos:${key}`);
+    if (!cached) return [];
+    return cached.items || cached.data?.items || cached.data || [];
+  }
+
+  getPRs(projects) {
+    const key = (projects || []).sort().join(',') || 'all';
+    const cached = cache.get(`worker:prs:${key}`);
+    if (!cached) return [];
+    return cached.items || cached.data?.items || cached.data || [];
+  }
+
+  getServiceConnections(projects) {
+    const key = (projects || []).sort().join(',') || 'all';
+    const cached = cache.get(`worker:serviceConnections:${key}`);
+    if (!cached) return [];
+    return cached.items || cached.data?.items || cached.data || [];
+  }
+
+  getWorkItems(ids) {
+    if (!ids?.length) return [];
+    const key = ids.sort().join(',');
+    const cached = cache.get(`worker:workitems:${key}`);
+    if (!cached) return [];
+    return cached.items || cached.data?.items || cached.data || [];
+  }
+
+  // NEW: Request API - called by UI components
+  request(type, params = {}) {
+    const req = {
+      type,
+      params,
+      priority: params.priority || 'background',
+      timestamp: Date.now(),
+      key: this._getRequestKey(type, params),
+    };
+    
+    this.log(`REQUEST: ${type} key=${req.key} priority=${req.priority} params=${JSON.stringify(params).slice(0, 50)}`);
+    
+    // Dedupe: if already queued, don't add again
+    const existingQueued = this._requestQueue.find(r => r.key === req.key);
+    if (existingQueued) {
+      this.log(`REQUEST SKIPPED (already queued): ${type} key=${req.key}`);
+      return;
+    }
+    
+    // Dedupe: if in flight, don't add again
+    if (this._inFlight.has(req.key)) {
+      this.log(`REQUEST SKIPPED (in flight): ${type} key=${req.key}`);
+      return;
+    }
+    
+    // Check cache first — if all data is cached, notify immediately without queuing
+    if (this._isCacheHit(type, params)) {
+      this.log(`CACHE HIT: ${type} key=${req.key} — notifying immediately`);
+      this.notify();
+      return;
+    }
+    
+    if (req.priority === 'user') {
+      this._requestQueue.unshift(req);
+    } else {
+      this._requestQueue.push(req);
+    }
+    
+    this.log(`REQUEST ADDED to queue: ${type}, queue length=${this._requestQueue.length}`);
+    this.notify();
+    this._processQueue();
+  }
+
+  _isCacheHit(type, params) {
+    if (type === 'pipelines' && params.projects?.length) {
+      return params.projects.every(p => cache.get(`worker:pipelines:${p}`) !== null);
+    }
+    if (type === 'pipelineRuns' && params.project) {
+      return cache.get(`worker:pipelineRuns:${params.project}`) !== null;
+    }
+    if (type === 'repos' && params.projects?.length) {
+      const key = params.projects.sort().join(',') || 'all';
+      return cache.get(`worker:repos:${key}`) !== null;
+    }
+    if (type === 'prs' && params.projects?.length) {
+      const key = params.projects.sort().join(',') || 'all';
+      return cache.get(`worker:prs:${key}`) !== null;
+    }
+    if (type === 'serviceConnections' && params.projects?.length) {
+      const key = params.projects.sort().join(',') || 'all';
+      return cache.get(`worker:serviceConnections:${key}`) !== null;
+    }
+    if (type === 'workitems' && params.ids?.length) {
+      const key = params.ids.sort().join(',');
+      return cache.get(`worker:workitems:${key}`) !== null;
+    }
+    return false;
+  }
+
+  // NEW: Get full state for UI
+  getState() {
+    const inFlightList = [];
+    for (const [key, entry] of this._inFlight) {
+      inFlightList.push({
+        key,
+        type: entry.request.type,
+        params: entry.request.params,
+        priority: entry.request.priority,
+        progress: this._progress.get(key) || null,
+        retry: entry.retry || 0,
+      });
+    }
+    
+    const queueList = this._requestQueue.map(req => ({
+      type: req.type,
+      params: req.params,
+      priority: req.priority,
+      timestamp: req.timestamp,
+      key: req.key,
+    }));
+    
+    return {
       activityLog: this.activityLog,
       lastRefresh: this.lastRefresh,
       lastPipelineRunsRefresh: this.lastPipelineRunsRefresh,
@@ -107,21 +257,421 @@ class BackgroundWorker {
       projectStatus: this.projectStatus,
       projects: this.projects,
       scopedProjectNames: this.scopedProjectNames,
-    }));
+      inFlight: inFlightList,
+      requestQueue: queueList,
+    };
+  }
+
+  // Get state enriched with data from cache — used by views
+  getFullState(params = {}) {
+    const base = this.getState();
+    const projects = params.projects || this.scopedProjectNames ? [...this.scopedProjectNames] : [];
+    
+    return {
+      ...base,
+      pipelines: this.getPipelines(projects),
+      pipelineRuns: projects.length > 0
+        ? Object.assign({}, ...projects.map(p => this.getPipelineRuns(p)))
+        : {},
+      repos: this.getRepos(projects),
+      prs: this.getPRs(projects),
+      serviceConnections: this.getServiceConnections(projects),
+    };
+  }
+
+  // NEW: Update progress for a request
+  _setProgress(key, progress) {
+    this._progress.set(key, progress);
+    this.notify();
+  }
+
+  _getRequestKey(type, params) {
+    if (params.ids?.length) return `${type}:ids:${params.ids.sort().join(',')}`;
+    if (params.query) return `${type}:q:${params.query}`;
+    if (params.projects?.length) return `${type}:${params.projects.sort().join(',')}`;
+    if (params.project) return `${type}:proj:${params.project}`;
+    return type;
+  }
+
+  async _processQueue() {
+    this.log(`PROCESS QUEUE: _processing=${this._processing} queue.length=${this._requestQueue.length}`);
+    if (this._processing || !this._requestQueue.length) return;
+    this._processing = true;
+    
+    while (this._requestQueue.length) {
+      const req = this._requestQueue.shift();
+      this.log(`DEQUEUED: ${req.type} key=${req.key}, remaining=${this._requestQueue.length}`);
+      await this._executeRequest(req);
+    }
+    
+    this._processing = false;
+    this.log(`QUEUE DONE: _processing=${this._processing}`);
+  }
+
+  async _executeRequest(req) {
+    const { key } = req;
+    
+    this.log(`EXECUTE REQUEST: ${req.type} key=${key}`);
+    
+    // Dedupe: skip if already in flight
+    if (this._inFlight.has(key)) {
+      this.log(`SKIP (already in flight): ${key}`);
+      return;
+    }
+    
+    const entry = {
+      promise: null,
+      request: req,
+      retry: 0,
+    };
+    
+    const promise = this._doFetchWithRetry(req);
+    entry.promise = promise;
+    this._inFlight.set(key, entry);
+    this.log(`IN FLIGHT: ${req.type} key=${key}, inFlight.size=${this._inFlight.size}`);
+    this.notify();
+    
+    try {
+      await promise;
+      this.log(`COMPLETED: ${req.type} key=${key}`);
+    } catch (e) {
+      this.log(`Request failed: ${req.type} - ${e.message}`);
+    } finally {
+      this._inFlight.delete(key);
+      this._progress.delete(key);
+      this.log(`REMOVED FROM FLIGHT: ${key}, remaining=${this._inFlight.size}`);
+      this.notify();
+    }
+  }
+
+  async _doFetchWithRetry(req) {
+    const { type, params } = req;
+    
+    this.log(`FETCH: ${type} with params: ${JSON.stringify(params).slice(0, 80)}`);
+    
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        if (type === 'search:workitem') {
+          return await this._searchWorkItems(params.query, params.projects);
+        } else if (type === 'search:repo') {
+          return await this._searchRepos(params.query, params.projects);
+        } else if (type === 'repos') {
+          return await this._fetchRepos(params.projects);
+        } else if (type === 'pipelines') {
+          return await this._fetchPipelines(params.projects);
+        } else if (type === 'pipelineRuns') {
+          return await this._fetchPipelineRuns(params.project, params.pipelineIds);
+        } else if (type === 'workitems') {
+          return await this._fetchWorkItems(params.ids);
+        } else if (type === 'prs') {
+          return await this._fetchPRs(params.projects);
+        } else if (type === 'serviceConnections') {
+          return await this._fetchServiceConnections(params.projects);
+        } else {
+          this.log(`UNKNOWN TYPE: ${type} - not handled`);
+          return [];
+        }
+      } catch (e) {
+        if (attempt < MAX_RETRIES - 1) {
+          const delay = RETRY_DELAYS[attempt] + Math.random() * 500;
+          this.log(`Retry ${attempt + 1}/${MAX_RETRIES} for ${type}: ${e.message}`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
+    }
+  }
+
+  async _searchWorkItems(query, projects) {
+    const projectsKey = (projects || []).sort().join(',') || 'all';
+    const workerKey = `worker:search:workitem:${projectsKey}:q:${query}`;
+    
+    let projectNames = projects;
+    if (!projectNames?.length) {
+      if (!this.projects.length) await this.loadProjects();
+      projectNames = this.projects.map(p => p.name);
+    }
+    
+    const total = projectNames.length;
+    let searched = 0;
+    const allItems = [];
+    
+    for (const projectName of projectNames) {
+      try {
+        const items = await this.client.searchWorkItems(query, {}, [projectName]);
+        allItems.push(...items);
+      } catch (e) {
+        // Continue on error
+      }
+      
+      searched++;
+      this._setProgress(workerKey, {
+        current: searched,
+        total,
+        percent: Math.round((searched / total) * 100),
+        currentProject: projectName,
+      });
+    }
+    
+    cache.set(workerKey, { items: allItems, _timestamp: Date.now() }, CACHE_TTL);
+    return allItems;
+  }
+
+  async _searchRepos(query, projects) {
+    const projectsKey = (projects || []).sort().join(',') || 'all';
+    const workerKey = `worker:search:repo:${projectsKey}:q:${query}`;
+    
+    let projectNames = projects;
+    if (!projectNames?.length) {
+      if (!this.projects.length) await this.loadProjects();
+      projectNames = this.projects.map(p => p.name);
+    }
+    
+    const total = projectNames.length;
+    let searched = 0;
+    const allItems = [];
+    
+    for (const projectName of projectNames) {
+      try {
+        const repos = await this.client.getRepos(projectName);
+        const filtered = repos.filter(r => 
+          r.name?.toLowerCase().includes(query.toLowerCase())
+        );
+        filtered.forEach(r => { r._projectName = projectName; });
+        allItems.push(...filtered);
+      } catch (e) {
+        // Continue on error
+      }
+      
+      searched++;
+      this._setProgress(workerKey, {
+        current: searched,
+        total,
+        percent: Math.round((searched / total) * 100),
+        currentProject: projectName,
+      });
+    }
+    
+    cache.set(workerKey, { items: allItems, _timestamp: Date.now() }, CACHE_TTL);
+    return allItems;
+  }
+
+  async _fetchRepos(projects) {
+    const projectsKey = (projects || []).sort().join(',') || 'all';
+    const workerKey = `worker:repos:${projectsKey}`;
+    
+    let projectNames = projects;
+    if (!projectNames?.length) {
+      if (!this.projects.length) await this.loadProjects();
+      projectNames = this.projects.map(p => p.name);
+    }
+    
+    const total = projectNames.length;
+    let searched = 0;
+    const allItems = [];
+    
+    for (const projectName of projectNames) {
+      try {
+        const repos = await this.client.getRepos(projectName);
+        repos.forEach(r => { r._projectName = projectName; });
+        allItems.push(...repos);
+      } catch (e) {
+        // Continue on error
+      }
+      
+      searched++;
+      this._setProgress(workerKey, {
+        current: searched,
+        total,
+        percent: Math.round((searched / total) * 100),
+        currentProject: projectName,
+      });
+    }
+    
+    cache.set(workerKey, { items: allItems, _timestamp: Date.now() }, CACHE_TTL);
+    return allItems;
+  }
+
+  async _fetchPipelines(projects) {
+    // Request key for deduplication (aggregated)
+    const requestKey = `pipelines:${(projects || []).sort().join(',')}`;
+    
+    let projectNames = projects;
+    if (!projectNames?.length) {
+      if (!this.projects.length) await this.loadProjects();
+      projectNames = this.projects.map(p => p.name);
+    }
+    
+    const total = projectNames.length;
+    let searched = 0;
+    
+    // Fetch EACH project individually and cache separately
+    for (const projectName of projectNames) {
+      // Skip if already cached (TTL respected)
+      const cacheKey = `worker:pipelines:${projectName}`;
+      if (cache.get(cacheKey) !== null) {
+        this.log(`SKIP (cached): ${cacheKey}`);
+        searched++;
+        this._setProgress(requestKey, {
+          current: searched,
+          total,
+          percent: Math.round((searched / total) * 100),
+          currentProject: projectName,
+          perProject: { [projectName]: 'cached' },
+        });
+        continue;
+      }
+
+      try {
+        const pipelines = await this.client.getPipelines(projectName);
+        pipelines.forEach(p => { p._projectName = projectName; });
+        
+        // PER-PROJECT cache key
+        cache.set(cacheKey, { items: pipelines, _timestamp: Date.now() }, CACHE_TTL);
+      } catch (e) {
+        this.log(`Failed to fetch pipelines for ${projectName}: ${e.message}`);
+      }
+      
+      searched++;
+      this._setProgress(requestKey, {
+        current: searched,
+        total,
+        percent: Math.round((searched / total) * 100),
+        currentProject: projectName,
+        perProject: { [projectName]: 'completed' },
+      });
+    }
+    
+    return []; // Data is in per-project cache keys
+  }
+
+  async _fetchPipelineRuns(project, pipelineIds) {
+    const workerKey = `worker:pipelineRuns:${project}`;
+    
+    if (!project) return [];
+    
+    try {
+      const pipelines = await this.client.getPipelines(project);
+      const defIds = pipelineIds?.length 
+        ? pipelineIds 
+        : pipelines.map(p => p.id);
+      
+      const runsMap = {};
+      const CHUNK_DEFS = 20;
+      
+      for (let i = 0; i < defIds.length; i += CHUNK_DEFS) {
+        const chunk = defIds.slice(i, i + CHUNK_DEFS);
+        try {
+          const map = await this.client.getBuildRunsForDefinitions(project, chunk, 3);
+          for (const k of Object.keys(map)) runsMap[String(k)] = map[k];
+        } catch (e) {
+          for (const id of chunk) runsMap[String(id)] = [];
+        }
+      }
+      
+      this._setProgress(workerKey, {
+        current: defIds.length,
+        total: defIds.length,
+        percent: 100,
+        currentProject: project,
+      });
+      
+      cache.set(workerKey, { items: runsMap, _timestamp: Date.now() }, RUNS_TTL);
+      return runsMap;
+    } catch (e) {
+      this.log(`Failed to fetch pipeline runs for ${project}: ${e.message}`);
+      return {};
+    }
+  }
+
+  async _fetchWorkItems(ids) {
+    if (!ids?.length) return [];
+    
+    try {
+      const items = await this.client.getWorkItemsByIds(ids);
+      const workerKey = `worker:workitems:${ids.sort().join(',')}`;
+      cache.set(workerKey, { items, _timestamp: Date.now() }, CACHE_TTL);
+      return items;
+    } catch (e) {
+      this.log(`Failed to fetch work items: ${e.message}`);
+      return [];
+    }
+  }
+
+  async _fetchPRs(projects) {
+    const projectsKey = (projects || []).sort().join(',') || 'all';
+    const workerKey = `worker:prs:${projectsKey}`;
+    
+    let projectNames = projects;
+    if (!projectNames?.length) {
+      if (!this.projects.length) await this.loadProjects();
+      projectNames = this.projects.map(p => p.name);
+    }
+    
+    const total = projectNames.length;
+    let searched = 0;
+    const allItems = [];
+    
+    for (const projectName of projectNames) {
+      try {
+        const prs = await this.client.getPullRequests(projectName);
+        prs.forEach(pr => { pr._projectName = projectName; });
+        allItems.push(...prs);
+      } catch (e) {
+        // Continue on error
+      }
+      
+      searched++;
+      this._setProgress(workerKey, {
+        current: searched,
+        total,
+        percent: Math.round((searched / total) * 100),
+        currentProject: projectName,
+      });
+    }
+    
+    cache.set(workerKey, { items: allItems, _timestamp: Date.now() }, CACHE_TTL);
+    return allItems;
+  }
+
+  async _fetchServiceConnections(projects) {
+    const projectsKey = (projects || []).sort().join(',') || 'all';
+    const workerKey = `worker:serviceConnections:${projectsKey}`;
+    
+    let projectNames = projects;
+    if (!projectNames?.length) {
+      if (!this.projects.length) await this.loadProjects();
+      projectNames = this.projects.map(p => p.name);
+    }
+    
+    const total = projectNames.length;
+    let searched = 0;
+    const allItems = [];
+    
+    for (const projectName of projectNames) {
+      try {
+        const scs = await this.client.getServiceConnections(projectName);
+        scs.forEach(sc => { sc._projectName = projectName; });
+        allItems.push(...scs);
+      } catch (e) {
+        // Continue on error
+      }
+      
+      searched++;
+      this._setProgress(workerKey, {
+        current: searched,
+        total,
+        percent: Math.round((searched / total) * 100),
+        currentProject: projectName,
+      });
+    }
+    
+    cache.set(workerKey, { items: allItems, _timestamp: Date.now() }, CACHE_TTL);
+    return allItems;
   }
 
   subscribe(callback) {
     this.listeners.add(callback);
-    callback({
-      activityLog: this.activityLog,
-      lastRefresh: this.lastRefresh,
-      lastPipelineRunsRefresh: this.lastPipelineRunsRefresh,
-      isRunning: this.isRunning,
-      isLeader: this.isLeader,
-      projectStatus: this.projectStatus,
-      projects: this.projects,
-      scopedProjectNames: this.scopedProjectNames,
-    });
+    callback(this.getState());
     return () => this.listeners.delete(callback);
   }
 

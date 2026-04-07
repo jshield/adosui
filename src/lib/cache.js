@@ -3,6 +3,7 @@ const PREFIX = "ado-cache:";
 
 const cache = {
   _data: {},
+  _listeners: new Set(),
 
   init() {
     // Migrate legacy single-blob cache
@@ -65,6 +66,16 @@ const cache = {
   set(key, data, ttl = CACHE_TTL) {
     this._data[key] = { data, timestamp: Date.now(), ttl };
     this._persist(key);
+    this._notify(key, this._data[key]);
+  },
+
+  subscribe(callback) {
+    this._listeners.add(callback);
+    return () => this._listeners.delete(callback);
+  },
+
+  _notify(key, entry) {
+    this._listeners.forEach(cb => cb(key, entry));
   },
 
   clear() {

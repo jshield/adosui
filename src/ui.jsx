@@ -7,6 +7,7 @@ import { loadLinkRules } from "./lib/linkRules";
 import { loadWorkflowTemplates } from "./lib/workflowManager";
 import { loadResourceTypes, getType, getSearchableTypes, getId, getDisplayProps, toggleInCollection, addCommentToCollection, mapItemToCollection } from "./lib/resourceTypes";
 import { search as resourceSearch, fetchAll, fetchForProjects } from "./lib/resourceApi";
+import { cache } from "./lib";
 import {
   ConnectScreen,
   SetupScreen,
@@ -448,7 +449,7 @@ export default function App() {
     });
   }, [collections, pinnedToolsCollection, updateCollection]);
 
-  // Global search
+  // Global search - uses worker for streaming results
   const handleSearch = useCallback(async (qOrEvent) => {
     const q = typeof qOrEvent === "string" ? qOrEvent : qOrEvent?.target?.value ?? "";
     setSearchQuery(q);
@@ -458,7 +459,6 @@ export default function App() {
     const token = ++searchTokenRef.current;
     setSearching(true);
 
-    // Build empty results from searchable types
     const searchableTypes = getSearchableTypes();
     const empty = {};
     searchableTypes.forEach(rt => {
@@ -466,74 +466,56 @@ export default function App() {
     });
     setSearchResults(empty);
 
-    const lower = q.toLowerCase();
     const col = collections.find(c => c.id === activeCol);
     const projects = col?.projects?.length ? col.projects : [];
 
-    const makeProgress = (key) => (name, searched, total) => {
-      if (searchTokenRef.current !== token) return;
-      setSearchProgress(prev => {
-        const next = { ...(prev || {}), [key]: { searched, total } };
-        const perProject = searchableTypes
-          .filter(rt => rt.source?.search?.mode === "filter" && rt.source?.api?.endpoints?.fetchProject)
-          .map(rt => rt.id);
-        const counts = perProject.filter(t => next[t]).map(t => next[t]);
-        if (counts.length) {
-          const searched = Math.min(...counts.map(c => c.searched));
-          const total = counts[0].total;
-          next.searched = searched;
-          next.total = total;
-        }
-        return next;
+    // Request search from worker for each type
+    searchableTypes.forEach(rt => {
+      const searchConf = rt.source?.search;
+      if (!searchConf) return;
+      
+      const type = searchConf.preset === "workItem" 
+        ? "search:workitem" 
+        : `search:${rt.id}`;
+      
+      backgroundWorker.request(type, {
+        query: q,
+        projects,
+        priority: 'user',
       });
-    };
+    });
 
-    const mergeResults = (key, items) => {
-      if (searchTokenRef.current !== token) return;
-      setSearchResults(prev => ({ ...(prev || empty), [key]: items }));
-    };
+    // Subscribe to cache for incremental results
+    const unsubs = searchableTypes.map(rt => {
+      const searchConf = rt.source?.search;
+      if (!searchConf) return () => {};
 
-    try {
-      const promises = searchableTypes.map(async (rt) => {
-        const searchConf = rt.source?.search;
-        if (!searchConf) return;
-
-        try {
-          if (searchConf.preset === "workItems") {
-            const items = await client.searchWorkItems(q, {}, projects);
-            mergeResults(rt.id, items);
-          } else if (searchConf.mode === "post") {
-            const items = await resourceSearch(client, rt, q, {}, projects);
-            mergeResults(rt.id, items);
-          } else if (searchConf.mode === "filter") {
-            const onProgress = makeProgress(rt.id);
-            let items;
-            if (projects.length && rt.source?.api?.endpoints?.fetchProject) {
-              items = await fetchForProjects(client, rt, projects, onProgress);
-            } else {
-              items = await fetchAll(client, rt, false, onProgress);
-            }
-            const filterField = searchConf.filterField;
-            if (filterField && q) {
-              items = items.filter(item => {
-                const val = item[filterField];
-                return val && String(val).toLowerCase().includes(lower);
-              });
-            }
-            mergeResults(rt.id, items);
+      const type = searchConf.preset === "workItem" 
+        ? "search:workitem" 
+        : `search:${rt.id}`;
+      
+      const cacheKey = `worker:${type}:q:${q}:${(projects || []).sort().join(',')}`;
+      
+      return cache.subscribe((changedKey, entry) => {
+        if (searchTokenRef.current !== token) return;
+        
+        if (changedKey === cacheKey) {
+          const items = entry.data?.items || entry.data || [];
+          setSearchResults(prev => ({ ...(prev || empty), [rt.id]: items }));
+          
+          // Check if all types have results
+          const allHaveResults = Object.keys(prev || empty).every(key => 
+            key === rt.id || (prev[key] && prev[key].length > 0) || entry.data?.items
+          );
+          if (allHaveResults && searchTokenRef.current === token) {
+            setSearching(false);
           }
-        } catch (e) {
-          console.warn(`Search error for ${rt.id}:`, e);
         }
       });
+    });
 
-      await Promise.allSettled(promises);
-    } catch (e) {
-      console.error("Search error:", e);
-    } finally {
-      if (searchTokenRef.current === token) setSearching(false);
-    }
-  }, [client, collections, activeCol]);
+    return () => { unsubs.forEach(u => u()); };
+  }, [collections, activeCol]);
 
   // Disconnect
   const handleDisconnect = useCallback(() => {

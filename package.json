@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
     "start": "node ado-server.js",
@@ -19,7 +19,12 @@
     "e2e:headed": "playwright test --headed"
   },
   "dependencies": {
+    "@codemirror/lang-yaml": "^6.1.2",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.36.5",
     "@microsoft/signalr": "^10.0.0",
+    "codemirror": "^6.0.1",
     "dagre": "^0.8.5",
     "dexie": "^4.3.0",
     "dexie-react-hooks": "^4.2.0",

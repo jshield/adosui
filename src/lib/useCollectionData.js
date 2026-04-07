@@ -1,16 +1,14 @@
-import { useState, useEffect } from "react";
-import { cache } from "./index";
-import { getId } from "./resourceTypes";
-
-const CACHE_TTL = 5 * 60 * 1000;
+import { useState, useEffect, useMemo } from "react";
+import cache from "./cache";
+import backgroundWorker from "./backgroundWorker";
 
 /**
- * Shared data hook for fetching collection resources from the ADO API.
- * Used by CollectionView for both the dashboard and search modes.
+ * Shared data hook for fetching collection resources from the worker + cache.
+ * Each type streams independently - no Promise.allSettled.
  *
  * @param {object} collection - The active collection
  * @param {import('./adoClient').ADOClient} client
- * @returns {{ fetchedItems: object, loading: boolean }}
+ * @returns {{ fetchedItems: object, loading: boolean, ages: object }}
  */
 export function useCollectionData(collection, client) {
   const [workItems, setWorkItems] = useState([]);
@@ -20,6 +18,7 @@ export function useCollectionData(collection, client) {
   const [serviceConnections, setServiceConnections] = useState([]);
   const [wikiPages, setWikiPages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [ages, setAges] = useState({});
 
   const repoIds = (collection.repos || []).map(r => r.id);
   const pipelineIds = (collection.pipelines || []).map(p => String(p.id));
@@ -37,54 +36,206 @@ export function useCollectionData(collection, client) {
     wikiPageIds.join(","),
   ].join("|");
 
+  // Work items - request from worker, read from cache
   useEffect(() => {
-    if (!collection || !client) { setLoading(false); return; }
-    setLoading(true);
+    if (!collection.workItemIds?.length) {
+      setWorkItems([]);
+      return;
+    }
 
-    const fetchData = async () => {
-      const wiPromise = collection.workItemIds?.length > 0
-        ? client.getWorkItemsByIds(collection.workItemIds.map(id => parseInt(id)))
-        : Promise.resolve([]);
+    const ids = collection.workItemIds.map(id => parseInt(id));
+    const cacheKey = `worker:workitems:${ids.join(',')}`;
 
-      const reposPromise = repoIds.length > 0
-        ? client.getAllRepos().then(all => all.filter(r => repoIds.includes(r.id)))
-        : Promise.resolve([]);
-
-      const pipesPromise = pipelineIds.length > 0
-        ? client.getAllPipelines().then(all => all.filter(p => pipelineIds.includes(String(p.id))))
-        : Promise.resolve([]);
-
-      const prsPromise = prIds.length > 0
-        ? client.getAllPullRequests().then(all => all.filter(pr => prIds.includes(String(pr.pullRequestId))))
-        : Promise.resolve([]);
-
-      const scsPromise = serviceConnectionIds.length > 0
-        ? client.getAllServiceConnections().then(all => all.filter(sc => serviceConnectionIds.includes(String(sc.id))))
-        : Promise.resolve([]);
-
-      const wikiPromise = wikiPageIds.length > 0
-        ? Promise.resolve(collection.wikiPages || [])
-        : Promise.resolve([]);
-
-      const [wi, r, p, pr, scs, wikis] = await Promise.allSettled([
-        wiPromise, reposPromise, pipesPromise, prsPromise, scsPromise, wikiPromise,
-      ]);
-
-      setWorkItems(wi.status === "fulfilled" ? wi.value : []);
-      setRepos(r.status === "fulfilled" ? r.value : []);
-      setPipelines(p.status === "fulfilled" ? p.value : []);
-      setPrs(pr.status === "fulfilled" ? pr.value : []);
-      setServiceConnections(scs.status === "fulfilled" ? scs.value : []);
-      setWikiPages(wikis.status === "fulfilled" ? wikis.value : []);
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      setWorkItems(cached.data?.items || cached.data || []);
+      setAges(prev => ({ ...prev, workItems: cached._timestamp ? Date.now() - cached._timestamp : null }));
       setLoading(false);
-    };
+    } else {
+      backgroundWorker.request('workitems', { ids });
+    }
+  }, [collection.workItemIds?.join(',')]);
 
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depKey]);
+  // Subscribe to work items cache updates
+  useEffect(() => {
+    if (!collection.workItemIds?.length) return;
+
+    const ids = collection.workItemIds.map(id => parseInt(id));
+    const cacheKey = `worker:workitems:${ids.join(',')}`;
+
+    const unsub = cache.subscribe((changedKey, entry) => {
+      if (changedKey === cacheKey) {
+        setWorkItems(entry.data?.items || entry.data || []);
+        setAges(prev => ({ ...prev, workItems: entry.data?._timestamp ? Date.now() - entry.data._timestamp : null }));
+        setLoading(false);
+      }
+    });
+
+    return unsub;
+  }, [collection.workItemIds?.join(',')]);
+
+  // Repos - request from worker, read from cache
+  useEffect(() => {
+    if (!collection.projects?.length) {
+      setRepos([]);
+      return;
+    }
+
+    const projectsKey = collection.projects.sort().join(',');
+    const cacheKey = `worker:repos:${projectsKey}`;
+
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      const allRepos = cached.data?.items || cached.data || [];
+      setRepos(allRepos.filter(r => repoIds.includes(r.id)));
+      setAges(prev => ({ ...prev, repos: cached.data?._timestamp ? Date.now() - cached.data._timestamp : null }));
+      setLoading(false);
+    } else {
+      backgroundWorker.request('repos', { projects: collection.projects });
+    }
+  }, [collection.projects?.join(',')]);
+
+  useEffect(() => {
+    if (!collection.projects?.length) return;
+
+    const projectsKey = collection.projects.sort().join(',');
+    const cacheKey = `worker:repos:${projectsKey}`;
+
+    const unsub = cache.subscribe((changedKey, entry) => {
+      if (changedKey === cacheKey) {
+        const allRepos = entry.data?.items || entry.data || [];
+        setRepos(allRepos.filter(r => repoIds.includes(r.id)));
+        setAges(prev => ({ ...prev, repos: entry.data?._timestamp ? Date.now() - entry.data._timestamp : null }));
+        setLoading(false);
+      }
+    });
+
+    return unsub;
+  }, [collection.projects?.join(','), repoIds.join(',')]);
+
+  // Pipelines - request from worker, read from cache
+  useEffect(() => {
+    if (!collection.projects?.length) {
+      setPipelines([]);
+      return;
+    }
+
+    const projectsKey = collection.projects.sort().join(',');
+    const cacheKey = `worker:pipelines:${projectsKey}`;
+
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      const allPipelines = cached.data?.items || cached.data || [];
+      setPipelines(allPipelines.filter(p => pipelineIds.includes(String(p.id))));
+      setAges(prev => ({ ...prev, pipelines: cached.data?._timestamp ? Date.now() - cached.data._timestamp : null }));
+      setLoading(false);
+    } else {
+      backgroundWorker.request('pipelines', { projects: collection.projects });
+    }
+  }, [collection.projects?.join(',')]);
+
+  useEffect(() => {
+    if (!collection.projects?.length) return;
+
+    const projectsKey = collection.projects.sort().join(',');
+    const cacheKey = `worker:pipelines:${projectsKey}`;
+
+    const unsub = cache.subscribe((changedKey, entry) => {
+      if (changedKey === cacheKey) {
+        const allPipelines = entry.data?.items || entry.data || [];
+        setPipelines(allPipelines.filter(p => pipelineIds.includes(String(p.id))));
+        setAges(prev => ({ ...prev, pipelines: entry.data?._timestamp ? Date.now() - entry.data._timestamp : null }));
+        setLoading(false);
+      }
+    });
+
+    return unsub;
+  }, [collection.projects?.join(','), pipelineIds.join(',')]);
+
+  // PRs - request from worker, read from cache
+  useEffect(() => {
+    if (!collection.projects?.length) {
+      setPrs([]);
+      return;
+    }
+
+    const key = `prs:${collection.projects.join(',')}`;
+    const cacheKey = `worker:${key}`;
+
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      const allPrs = cached.data?.items || cached.data || [];
+      setPrs(allPrs.filter(pr => prIds.includes(String(pr.pullRequestId))));
+      setAges(prev => ({ ...prev, prs: cached.data?._timestamp ? Date.now() - cached.data._timestamp : null }));
+    }
+
+    backgroundWorker.request('prs', { projects: collection.projects });
+  }, [collection.projects?.join(',')]);
+
+  useEffect(() => {
+    if (!collection.projects?.length) return;
+
+    const key = `prs:${collection.projects.join(',')}`;
+    const cacheKey = `worker:${key}`;
+
+    const unsub = cache.subscribe((changedKey, entry) => {
+      if (changedKey === cacheKey) {
+        const allPrs = entry.data?.items || entry.data || [];
+        setPrs(allPrs.filter(pr => prIds.includes(String(pr.pullRequestId))));
+        setAges(prev => ({ ...prev, prs: entry.data?._timestamp ? Date.now() - entry.data._timestamp : null }));
+        setLoading(false);
+      }
+    });
+
+    return unsub;
+  }, [collection.projects?.join(','), prIds.join(',')]);
+
+  // Service Connections - request from worker, read from cache
+  useEffect(() => {
+    if (!collection.projects?.length) {
+      setServiceConnections([]);
+      return;
+    }
+
+    const key = `serviceConnections:${collection.projects.join(',')}`;
+    const cacheKey = `worker:${key}`;
+
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      const allScs = cached.data?.items || cached.data || [];
+      setServiceConnections(allScs.filter(sc => serviceConnectionIds.includes(String(sc.id))));
+      setAges(prev => ({ ...prev, serviceConnections: cached.data?._timestamp ? Date.now() - cached.data._timestamp : null }));
+    }
+
+    backgroundWorker.request('serviceConnections', { projects: collection.projects });
+  }, [collection.projects?.join(',')]);
+
+  useEffect(() => {
+    if (!collection.projects?.length) return;
+
+    const key = `serviceConnections:${collection.projects.join(',')}`;
+    const cacheKey = `worker:${key}`;
+
+    const unsub = cache.subscribe((changedKey, entry) => {
+      if (changedKey === cacheKey) {
+        const allScs = entry.data?.items || entry.data || [];
+        setServiceConnections(allScs.filter(sc => serviceConnectionIds.includes(String(sc.id))));
+        setAges(prev => ({ ...prev, serviceConnections: entry.data?._timestamp ? Date.now() - entry.data._timestamp : null }));
+        setLoading(false);
+      }
+    });
+
+    return unsub;
+  }, [collection.projects?.join(','), serviceConnectionIds.join(',')]);
+
+  // Wiki pages - stored in collection, no fetch needed
+  useEffect(() => {
+    setWikiPages(collection.wikiPages || []);
+  }, [collection.wikiPages]);
 
   return {
     fetchedItems: { workitem: workItems, repo: repos, pipeline: pipelines, pr: prs, serviceconnection: serviceConnections, wiki: wikiPages },
     loading,
+    ages,
   };
 }
