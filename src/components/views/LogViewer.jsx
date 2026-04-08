@@ -1,15 +1,17 @@
-import React, { useRef, useEffect, useCallback, useState } from "react";
+import React, { useRef, useEffect, useCallback, useState, useMemo } from "react";
+import { FixedSizeList } from "react-window";
+import AutoSizer from "react-virtualized-auto-sizer";
 import { T } from "../../lib/theme";
 
 const LINE_HEIGHT = 20;
 
-function LogLine({ line, index, isSelected, hasComment, isSelecting, onMouseDown, onMouseEnter }) {
+function LogLine({ style, line, index, isSelected, hasComment, isSelecting, onMouseDown, onMouseEnter }) {
   return (
     <div
       style={{
+        ...style,
         display: "flex",
         alignItems: "center",
-        height: LINE_HEIGHT,
         background: isSelected ? "rgba(245,158,11,0.12)" : "transparent",
         userSelect: isSelecting ? "none" : "auto",
       }}
@@ -71,6 +73,24 @@ function LogLine({ line, index, isSelected, hasComment, isSelecting, onMouseDown
   );
 }
 
+const Row = React.memo(({ index, style, data }) => {
+  const { lines, selStart, selEnd, commentedLines, isSelecting, handleMouseDown, handleMouseEnter } = data;
+  const line = lines[index];
+  const isSelected = selStart >= 0 && selEnd >= 0 && index >= selStart && index <= selEnd;
+  return (
+    <LogLine
+      style={style}
+      line={line}
+      index={index}
+      isSelected={isSelected}
+      hasComment={commentedLines?.has(index) || false}
+      isSelecting={isSelecting}
+      onMouseDown={handleMouseDown}
+      onMouseEnter={handleMouseEnter}
+    />
+  );
+});
+
 export function LogViewer({
   lines,
   loading,
@@ -81,7 +101,7 @@ export function LogViewer({
   noLogMessage,
   scrollToLine,
 }) {
-  const containerRef = useRef(null);
+  const listRef = useRef(null);
   const prevLenRef = useRef(0);
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionStart, setSelectionStart] = useState(null);
@@ -92,19 +112,18 @@ export function LogViewer({
     if (
       connectionStatus === "connected" &&
       lines.length > prevLenRef.current &&
-      containerRef.current
+      listRef.current
     ) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      listRef.current.scrollToItem(lines.length - 1, "end");
     }
     prevLenRef.current = lines.length;
   }, [lines.length, connectionStatus]);
 
   // Scroll to a specific line when requested (e.g. clicking a comment)
   useEffect(() => {
-    if (scrollToLine != null && containerRef.current) {
-      const targetTop = scrollToLine * LINE_HEIGHT;
+    if (scrollToLine != null && listRef.current) {
       // Offset by 3 lines so there's context above the target
-      containerRef.current.scrollTop = Math.max(0, targetTop - LINE_HEIGHT * 3);
+      listRef.current.scrollToItem(Math.max(0, scrollToLine - 3), "start");
     }
   }, [scrollToLine]);
 
@@ -138,6 +157,12 @@ export function LogViewer({
   const selStart = Math.min(effectiveStart ?? -1, effectiveEnd ?? -1);
   const selEnd = Math.max(effectiveStart ?? -1, effectiveEnd ?? -1);
 
+  // Memoize itemData to avoid re-rendering all rows when unrelated state changes
+  const itemData = useMemo(
+    () => ({ lines, selStart, selEnd, commentedLines, isSelecting, handleMouseDown, handleMouseEnter }),
+    [lines, selStart, selEnd, commentedLines, isSelecting, handleMouseDown, handleMouseEnter]
+  );
+
   if (!lines?.length && !loading) {
     return (
       <div style={{ padding: 16, color: T.muted, fontSize: 12 }}>
@@ -148,42 +173,38 @@ export function LogViewer({
 
   return (
     <div
-      ref={containerRef}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       style={{
         flex: 1,
         minHeight: 0,
-        overflowY: "auto",
         background: T.bg,
         borderRadius: 4,
         border: `1px solid ${T.border}`,
         position: "relative",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
-      {/* Status bar */}
+      {/* Progress bar (loading / live connected) */}
       {(loading || connectionStatus === "connected" || connectionStatus === "connecting") && (
         <div
           style={{
-            position: "sticky",
-            top: 0,
-            left: 0,
-            right: 0,
             height: 2,
+            flexShrink: 0,
             background: connectionStatus === "connected" ? T.green : T.amber,
             opacity: 0.6,
-            zIndex: 1,
           }}
         />
       )}
 
-      {/* Connection indicator */}
+      {/* Connection status badge */}
       {connectionStatus && connectionStatus !== "disconnected" && (
         <div
           style={{
-            position: "sticky",
+            position: "absolute",
             top: 4,
-            float: "right",
+            right: 8,
             fontSize: 9,
             color:
               connectionStatus === "connected"
@@ -195,26 +216,30 @@ export function LogViewer({
             padding: "2px 6px",
             borderRadius: 3,
             zIndex: 2,
-            marginRight: 8,
           }}
         >
           {connectionStatus}
         </div>
       )}
 
-      {/* Log lines */}
-      {lines.map((line, index) => (
-        <LogLine
-          key={line.lineNumber ?? index}
-          line={line}
-          index={index}
-          isSelected={selStart >= 0 && selEnd >= 0 && index >= selStart && index <= selEnd}
-          hasComment={commentedLines?.has(index) || false}
-          isSelecting={isSelecting}
-          onMouseDown={handleMouseDown}
-          onMouseEnter={handleMouseEnter}
-        />
-      ))}
+      {/* Virtualized log lines */}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <AutoSizer>
+          {({ width, height }) => (
+            <FixedSizeList
+              ref={listRef}
+              width={width}
+              height={height}
+              itemCount={lines.length}
+              itemSize={LINE_HEIGHT}
+              itemData={itemData}
+              overscanCount={10}
+            >
+              {Row}
+            </FixedSizeList>
+          )}
+        </AutoSizer>
+      </div>
     </div>
   );
 }

@@ -99,7 +99,7 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
       const PER_DEF = 3;
       const MANUAL_TTL = 60 * 1000; // match worker RUNS_TTL
 
-      for (const [projectName, defIds] of Object.entries(byProject)) {
+      await Promise.all(Object.entries(byProject).map(async ([projectName, defIds]) => {
         const projectRunsMap = {};
         for (let i = 0; i < defIds.length; i += CHUNK_DEFS) {
           const chunk = defIds.slice(i, i + CHUNK_DEFS);
@@ -126,7 +126,7 @@ export function PipelinesView({ client, org, pinnedCollection, onTogglePin, prof
         // Merge newly cached runs into local state
         const cached = cache.get(`project:${projectName}:pipelineRuns`) || {};
         setPipelineRuns(prev => ({ ...prev, ...Object.fromEntries(Object.entries(cached).map(([k,v]) => [String(k), v || []])) }));
-      }
+      }));
 
       // Signal a refresh time so UI shows "Runs refreshed:"
       try {
