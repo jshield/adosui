@@ -1,75 +1,56 @@
-import React, { useRef, useEffect, useCallback, useState } from "react";
+import React, { useRef, useEffect, useCallback, useState, useMemo } from "react";
+import { List } from "react-window";
+import { AutoSizer } from "react-virtualized-auto-sizer";
 import { T } from "../../lib/theme";
 
 const LINE_HEIGHT = 20;
 
-function LogLine({ line, index, isSelected, hasComment, isSelecting, onMouseDown, onMouseEnter }) {
+function LogLineRow({
+  index, style,
+  // rowProps spread in by react-window v2
+  lines, selStart, selEnd, commentedLines, isSelecting, handleMouseDown, handleMouseEnter,
+}) {
+  const line = lines[index];
+  const isSelected = selStart >= 0 && selEnd >= 0 && index >= selStart && index <= selEnd;
   return (
     <div
       style={{
+        ...style,
         display: "flex",
         alignItems: "center",
-        height: LINE_HEIGHT,
         background: isSelected ? "rgba(245,158,11,0.12)" : "transparent",
         userSelect: isSelecting ? "none" : "auto",
       }}
-      onMouseDown={(e) => onMouseDown(index, e)}
-      onMouseEnter={() => onMouseEnter(index)}
+      onMouseDown={(e) => handleMouseDown(index, e)}
+      onMouseEnter={() => handleMouseEnter(index)}
     >
       {/* Comment indicator */}
-      <div
-        style={{
-          width: 8,
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {hasComment && (
-          <div
-            style={{
-              width: 4,
-              height: 4,
-              borderRadius: "50%",
-              background: T.amber,
-            }}
-          />
+      <div style={{ width: 8, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {commentedLines?.has(index) && (
+          <div style={{ width: 4, height: 4, borderRadius: "50%", background: T.amber }} />
         )}
       </div>
 
       {/* Line number */}
-      <span
-        style={{
-          width: 48,
-          flexShrink: 0,
-          textAlign: "right",
-          paddingRight: 10,
-          fontSize: 10,
-          fontFamily: "JetBrains Mono, monospace",
-          color: T.dim,
-          userSelect: "none",
-        }}
-      >
+      <span style={{
+        width: 48, flexShrink: 0, textAlign: "right", paddingRight: 10,
+        fontSize: 10, fontFamily: "JetBrains Mono, monospace", color: T.dim, userSelect: "none",
+      }}>
         {line.lineNumber}
       </span>
 
       {/* Content */}
-      <span
-        style={{
-          flex: 1,
-          fontSize: 11,
-          fontFamily: "JetBrains Mono, monospace",
-          color: T.text,
-          whiteSpace: "pre",
-          overflow: "hidden",
-        }}
-      >
+      <span style={{
+        flex: 1, fontSize: 11, fontFamily: "JetBrains Mono, monospace",
+        color: T.text, whiteSpace: "pre", overflow: "hidden",
+      }}>
         {line.content}
       </span>
     </div>
   );
 }
+
+const MemoRow = React.memo(LogLineRow);
 
 export function LogViewer({
   lines,
@@ -81,7 +62,7 @@ export function LogViewer({
   noLogMessage,
   scrollToLine,
 }) {
-  const containerRef = useRef(null);
+  const listRef = useRef(null);
   const prevLenRef = useRef(0);
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionStart, setSelectionStart] = useState(null);
@@ -92,19 +73,17 @@ export function LogViewer({
     if (
       connectionStatus === "connected" &&
       lines.length > prevLenRef.current &&
-      containerRef.current
+      listRef.current
     ) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      listRef.current.scrollToRow({ index: lines.length - 1, align: "end" });
     }
     prevLenRef.current = lines.length;
   }, [lines.length, connectionStatus]);
 
   // Scroll to a specific line when requested (e.g. clicking a comment)
   useEffect(() => {
-    if (scrollToLine != null && containerRef.current) {
-      const targetTop = scrollToLine * LINE_HEIGHT;
-      // Offset by 3 lines so there's context above the target
-      containerRef.current.scrollTop = Math.max(0, targetTop - LINE_HEIGHT * 3);
+    if (scrollToLine != null && listRef.current) {
+      listRef.current.scrollToRow({ index: Math.max(0, scrollToLine - 3), align: "start" });
     }
   }, [scrollToLine]);
 
@@ -117,9 +96,7 @@ export function LogViewer({
 
   const handleMouseEnter = useCallback(
     (index) => {
-      if (isSelecting) {
-        setSelectionEnd(index);
-      }
+      if (isSelecting) setSelectionEnd(index);
     },
     [isSelecting]
   );
@@ -138,6 +115,12 @@ export function LogViewer({
   const selStart = Math.min(effectiveStart ?? -1, effectiveEnd ?? -1);
   const selEnd = Math.max(effectiveStart ?? -1, effectiveEnd ?? -1);
 
+  // Memoize rowProps to avoid re-rendering all rows on unrelated state changes
+  const rowProps = useMemo(
+    () => ({ lines, selStart, selEnd, commentedLines, isSelecting, handleMouseDown, handleMouseEnter }),
+    [lines, selStart, selEnd, commentedLines, isSelecting, handleMouseDown, handleMouseEnter]
+  );
+
   if (!lines?.length && !loading) {
     return (
       <div style={{ padding: 16, color: T.muted, fontSize: 12 }}>
@@ -148,73 +131,51 @@ export function LogViewer({
 
   return (
     <div
-      ref={containerRef}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       style={{
         flex: 1,
         minHeight: 0,
-        overflowY: "auto",
         background: T.bg,
         borderRadius: 4,
         border: `1px solid ${T.border}`,
         position: "relative",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
-      {/* Status bar */}
+      {/* Progress bar (loading / live connected) */}
       {(loading || connectionStatus === "connected" || connectionStatus === "connecting") && (
-        <div
-          style={{
-            position: "sticky",
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 2,
-            background: connectionStatus === "connected" ? T.green : T.amber,
-            opacity: 0.6,
-            zIndex: 1,
-          }}
-        />
+        <div style={{
+          height: 2, flexShrink: 0,
+          background: connectionStatus === "connected" ? T.green : T.amber,
+          opacity: 0.6,
+        }} />
       )}
 
-      {/* Connection indicator */}
+      {/* Connection status badge */}
       {connectionStatus && connectionStatus !== "disconnected" && (
-        <div
-          style={{
-            position: "sticky",
-            top: 4,
-            float: "right",
-            fontSize: 9,
-            color:
-              connectionStatus === "connected"
-                ? T.green
-                : connectionStatus === "error"
-                ? T.red
-                : T.amber,
-            background: "rgba(0,0,0,0.6)",
-            padding: "2px 6px",
-            borderRadius: 3,
-            zIndex: 2,
-            marginRight: 8,
-          }}
-        >
+        <div style={{
+          position: "absolute", top: 4, right: 8, fontSize: 9,
+          color: connectionStatus === "connected" ? T.green : connectionStatus === "error" ? T.red : T.amber,
+          background: "rgba(0,0,0,0.6)", padding: "2px 6px", borderRadius: 3, zIndex: 2,
+        }}>
           {connectionStatus}
         </div>
       )}
 
-      {/* Log lines */}
-      {lines.map((line, index) => (
-        <LogLine
-          key={line.lineNumber ?? index}
-          line={line}
-          index={index}
-          isSelected={selStart >= 0 && selEnd >= 0 && index >= selStart && index <= selEnd}
-          hasComment={commentedLines?.has(index) || false}
-          isSelecting={isSelecting}
-          onMouseDown={handleMouseDown}
-          onMouseEnter={handleMouseEnter}
+      {/* Virtualized log lines */}
+      <AutoSizer style={{ flex: 1, minHeight: 0 }} renderProp={({ width, height }) => (
+        <List
+          listRef={listRef}
+          rowComponent={MemoRow}
+          rowCount={lines.length}
+          rowHeight={LINE_HEIGHT}
+          rowProps={rowProps}
+          style={{ height: height || 0, width: width || 0 }}
+          overscanCount={10}
         />
-      ))}
+      )} />
     </div>
   );
 }

@@ -171,45 +171,46 @@ export class ADOClient {
   }
 
   async _collectFromProjects(cacheKey, fetcher, projectNames, forceRefresh, onProjectSearched) {
-    if (forceRefresh) cache.invalidate(cacheKey);
     if (!projectNames.length) {
       if (!this._projects.length) await this.getProjects();
       projectNames = this._projects.map(p => p.name);
     }
-    const total = projectNames.length;
-    let searched = 0;
-    const all = [];
-    for (const name of projectNames) {
-      const items = await this._getProjectCached(name, cacheKey, fetcher);
-      all.push(...items);
-      searched++;
-      if (onProjectSearched) onProjectSearched(name, searched, total);
+    // Invalidate only the specific type's cache entries, not all project-scoped data
+    if (forceRefresh) {
+      for (const name of projectNames) {
+        cache.invalidate(`project:${name}:${cacheKey}`);
+      }
     }
-    return all;
+    const total = projectNames.length;
+    let completed = 0;
+    const results = await Promise.all(
+      projectNames.map(async (name) => {
+        const items = await this._getProjectCached(name, cacheKey, fetcher);
+        completed++;
+        if (onProjectSearched) onProjectSearched(name, completed, total);
+        return items;
+      })
+    );
+    return results.flat();
   }
 
   async getAllRepos(forceRefresh = false, onProjectSearched) {
-    if (forceRefresh) cache.invalidate("project:");
     return this._collectFromProjects("repos", n => this.getRepos(n), [], forceRefresh, onProjectSearched);
   }
 
   async getAllPipelines(forceRefresh = false, onProjectSearched) {
-    if (forceRefresh) cache.invalidate("project:");
     return this._collectFromProjects("pipelines", n => this.getPipelines(n), [], forceRefresh, onProjectSearched);
   }
 
   async getAllPullRequests(forceRefresh = false, onProjectSearched) {
-    if (forceRefresh) cache.invalidate("project:");
     return this._collectFromProjects("prs", n => this.getPullRequests(n), [], forceRefresh, onProjectSearched);
   }
 
   async getAllTestRuns(forceRefresh = false, onProjectSearched) {
-    if (forceRefresh) cache.invalidate("project:");
     return this._collectFromProjects("testRuns", n => this.getTestRuns(n), [], forceRefresh, onProjectSearched);
   }
 
   async getAllServiceConnections(forceRefresh = false, onProjectSearched) {
-    if (forceRefresh) cache.invalidate("project:");
     return this._collectFromProjects("serviceConnections", n => this.getServiceConnections(n), [], forceRefresh, onProjectSearched);
   }
 
@@ -237,7 +238,7 @@ export class ADOClient {
   }
 
   async getPipelines(project) {
-    const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/pipelines?api-version=7.1&$top=50`);
+    const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/pipelines?api-version=7.1&$top=500`);
     return r.value || [];
   }
 
@@ -295,7 +296,7 @@ export class ADOClient {
   }
 
   async getPullRequests(project) {
-    const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/git/pullrequests?searchCriteria.status=active&$top=30&api-version=7.1`);
+    const r = await this._fetch(`${this.base}/${encodeURIComponent(project)}/_apis/git/pullrequests?searchCriteria.status=active&$top=200&api-version=7.1`);
     return r.value || [];
   }
 

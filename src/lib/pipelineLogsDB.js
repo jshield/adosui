@@ -67,14 +67,15 @@ export async function getLogLines(runId, recordId) {
 export async function appendSignalRLines(runId, recordId, lines) {
   if (!lines?.length) return;
 
-  // Find the current max lineNumber for this record
+  // Find the current max lineNumber for this record.
+  // NOTE: sortBy() always sorts ascending in-memory regardless of .reverse(),
+  // so use the last element to get the maximum lineNumber.
   const existing = await pipelineLogsDB.logLines
     .where("[runId+recordId]")
     .equals([runId, recordId])
-    .reverse()
     .sortBy("lineNumber");
 
-  const startLine = existing.length > 0 ? existing[0].lineNumber + 1 : 1;
+  const startLine = existing.length > 0 ? existing[existing.length - 1].lineNumber + 1 : 1;
   const timestamp = Date.now();
 
   await pipelineLogsDB.logLines.bulkAdd(

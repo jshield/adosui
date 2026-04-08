@@ -13,6 +13,42 @@ import {
   ResourceToggle, Input, EmptyState,
 } from "../ui";
 
+function RemoveBtn({ type, id, onRemove }) {
+  return (
+    <button onClick={() => onRemove(type, id)}
+      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12, flexShrink: 0 }}>
+      × Remove
+    </button>
+  );
+}
+
+function Group({ id, title, items, children }) {
+  const [collapsed, setCollapsed] = useState(false);
+  if (!items?.length) return null;
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div
+        onClick={() => setCollapsed(!collapsed)}
+        style={{
+          fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'",
+          letterSpacing: "0.1em", textTransform: "uppercase",
+          marginBottom: collapsed ? 0 : 10, padding: "0 4px",
+          cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+          userSelect: "none",
+        }}
+      >
+        <span style={{
+          display: "inline-block", fontSize: 8,
+          transition: "transform 0.15s",
+          transform: collapsed ? "rotate(0deg)" : "rotate(90deg)",
+        }}>▶</span>
+        {title} ({items.length})
+      </div>
+      {!collapsed && items.map(children)}
+    </div>
+  );
+}
+
 /**
  * Unified collection view — merges ResourcePanel, CollectionResources,
  * and SearchResultsList into a single component with:
@@ -91,41 +127,6 @@ export function CollectionView({
     else onResourceToggle(type, id, collection.id);
   }, [collection.id, onWorkItemToggle, onResourceToggle]);
 
-  const RemoveBtn = ({ type, id }) => (
-    <button onClick={() => removeItem(type, id)}
-      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "4px 10px", cursor: "pointer", color: T.dim, fontSize: 12, flexShrink: 0 }}>
-      × Remove
-    </button>
-  );
-
-  // ── Collapsible group ─────────────────────────────────────────────────
-  const Group = ({ id, title, items, children }) => {
-    if (!items?.length) return null;
-    const [collapsed, setCollapsed] = useState(false);
-    return (
-      <div style={{ marginBottom: 24 }}>
-        <div
-          onClick={() => setCollapsed(!collapsed)}
-          style={{
-            fontSize: 10, color: T.dim, fontFamily: "'JetBrains Mono'",
-            letterSpacing: "0.1em", textTransform: "uppercase",
-            marginBottom: collapsed ? 0 : 10, padding: "0 4px",
-            cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-            userSelect: "none",
-          }}
-        >
-          <span style={{
-            display: "inline-block", fontSize: 8,
-            transition: "transform 0.15s",
-            transform: collapsed ? "rotate(0deg)" : "rotate(90deg)",
-          }}>▶</span>
-          {title} ({items.length})
-        </div>
-        {!collapsed && items.map(children)}
-      </div>
-    );
-  };
-
   // ── Generic card (driven by registry display config) ──────────────────
   const renderGenericCard = (rt, item, opts = {}) => {
     const dp = getDisplayProps(rt.id, item);
@@ -173,7 +174,7 @@ export function CollectionView({
             ) : showToggle && onCardClick ? (
               <ResourceToggle type={rt.id} item={item} collection={collection} onResourceToggle={onResourceToggle} onWorkItemToggle={onWorkItemToggle} />
             ) : (
-              <RemoveBtn type={rt.id} id={id} />
+              <RemoveBtn type={rt.id} id={id} onRemove={removeItem} />
             )}
           </div>
         </Card>
@@ -239,7 +240,7 @@ export function CollectionView({
                 />
               )}
             </div>
-            <RemoveBtn type="link" id={link.url} />
+            <RemoveBtn type="link" id={link.url} onRemove={removeItem} />
           </div>
         </Card>
       </div>

@@ -198,6 +198,17 @@ export default function App() {
     }
   }, [storage, client, org, repoConfig, showToast]);
 
+  // Flush pending saves on tab close to prevent data loss during debounce window
+  useEffect(() => {
+    const flush = () => {
+      for (const col of collections.filter(c => pendingSaves.current.has(c.id))) {
+        persistCollection(col);
+      }
+    };
+    window.addEventListener("beforeunload", flush);
+    return () => window.removeEventListener("beforeunload", flush);
+  }, [collections, persistCollection]);
+
   // Debounced save on any collection change
   useEffect(() => {
     if (!storage || !collections.length) return;
