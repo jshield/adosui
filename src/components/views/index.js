@@ -12,3 +12,4 @@ export { Rail }                                from "./Rail";
 export { WorkerStatusView }                    from "./WorkerStatusView";
 export { YamlToolsView }                      from "./YamlToolsView";
 export { WorkflowTemplateSelector }            from "./WorkflowTemplateSelector";
+export { PlanModeView }                        from "./PlanModeView";

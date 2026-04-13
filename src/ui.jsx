@@ -18,6 +18,7 @@ import {
   Rail,
   WorkerStatusView,
   YamlToolsView,
+  PlanModeView,
 } from "./components/views";
 import { hasStoredCredentials, clearCredentials, loadPAT, clearSessionKey } from "./lib/credentialStore";
 import backgroundWorker from "./lib/backgroundWorker";
@@ -59,7 +60,7 @@ export default function App() {
   const [activeTabId, setActiveTabId] = useState(null);
 
   // View
-  const [view, setView] = useState("search"); // "search" | "newCollection" | "resources" | "pipelines"
+  const [view, setView] = useState("search"); // "search" | "newCollection" | "resources" | "pipelines" | "workerStatus" | "yamlTools" | "planMode"
 
   // Search
   const [searchQuery,           setSearchQuery]           = useState("");
@@ -664,6 +665,7 @@ export default function App() {
           onShowPipelines={() => setView("pipelines")}
           onShowWorkerStatus={() => setView("workerStatus")}
           onShowYamlTools={() => setView("yamlTools")}
+          onShowPlanMode={() => setView("planMode")}
           client={client}
           onUpdatePat={handleUpdatePat}
           onReconfigure={handleReconfigure}
@@ -700,6 +702,16 @@ export default function App() {
               onTogglePinTool={handleTogglePinTool}
               onResourceToggle={handleResourceToggle}
               activeColId={activeCol}
+            />
+          </div>
+        ) : view === "planMode" ? (
+          <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+            <PlanModeView
+              client={client}
+              repoConfig={repoConfig}
+              profile={profile}
+              collections={collections}
+              showToast={showToast}
             />
           </div>
         ) : (
