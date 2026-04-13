@@ -28,6 +28,7 @@
     "dagre": "^0.8.5",
     "dexie": "^4.3.0",
     "dexie-react-hooks": "^4.2.0",
+    "eruda": "^3.4.3",
     "hkdf": "0.0.2",
     "js-yaml": "^4.1.1",
     "marked": "^17.0.4",
