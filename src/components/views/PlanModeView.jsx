@@ -11,7 +11,7 @@ import yaml from "js-yaml";
 import { T } from "../../lib/theme";
 import {
   Btn, Spinner, Card, SectionLabel, SelectableRow, Dot, Input, Modal,
-  EmptyState, Pill
+  EmptyState, Pill, inputStyle
 } from "../ui";
 import { T as Theme } from "../../lib/theme";
 import {
