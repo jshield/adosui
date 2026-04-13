@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from "react";
 import yaml from "js-yaml";
 import { T } from "../../lib/theme";
 import {
-  Btn, Spinner, Card, SectionLabel, SelectableRow, Dot, Input, Textarea, Modal,
+  Btn, Spinner, Card, SectionLabel, SelectableRow, Dot, Input, Modal,
   EmptyState, Pill
 } from "../ui";
 import { T as Theme } from "../../lib/theme";
@@ -324,11 +324,11 @@ export function PlanModeView({
           )}
 
           {/* Prompt Text */}
-          <Textarea
+          <textarea
             placeholder="Enter your prompt for the LLM..."
             value={promptText}
             onChange={(e) => setPromptText(e.target.value)}
-            style={{ minHeight: 100 }}
+            style={{ ...inputStyle, minHeight: 100, width: '100%' }}
           />
 
           <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
@@ -345,11 +345,11 @@ export function PlanModeView({
             Paste YAML or JSON from the LLM to create a request
           </p>
 
-          <Textarea
+          <textarea
             placeholder="Paste LLM output here..."
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            style={{ minHeight: 150 }}
+            style={{ ...inputStyle, minHeight: 150, width: '100%' }}
           />
 
           {parseError && (
