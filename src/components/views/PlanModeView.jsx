@@ -20,7 +20,7 @@ import {
   getStatusLabel, getActionLabel
 } from "../../lib/llmRequestManager";
 import {
-  loadTemplates, getAllTemplates, renderTemplate, fetchAdditionalContext
+  loadTemplates, getAllTemplates, renderPrompt, validateResponse
 } from "../../lib/templateEngine";
 import { executeRequest, generateActionPreview, validateRequestActions } from "../../lib/executor";
 import backgroundWorker from "../../lib/backgroundWorker";
@@ -40,6 +40,7 @@ export function PlanModeView({
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [templateVariables, setTemplateVariables] = useState({});
   const [selectedResources, setSelectedResources] = useState([]); // { type, id, data }
+  const [userGoal, setUserGoal] = useState(""); // User's specific goal
 
   // Input parser state
   const [inputText, setInputText] = useState("");
@@ -82,9 +83,12 @@ export function PlanModeView({
 
   // ── Prompt Builder ───────────────────────────────────────────────────────────
 
+  const [showTemplateDetail, setShowTemplateDetail] = useState(false);
+
   const handleSelectTemplate = (templateId) => {
     const t = templates.find((t) => t.id === templateId);
     setSelectedTemplate(t);
+    setUserGoal("");
     const defaults = {};
     for (const v of t?.variables || []) {
       if (v.default !== undefined) defaults[v.name] = v.default;
@@ -107,25 +111,18 @@ export function PlanModeView({
   };
 
   async function buildFullPrompt() {
-    if (!selectedTemplate || selectedResources.length === 0) {
+    if (!selectedTemplate) {
       return promptText;
     }
-
-    const rendered = await renderTemplate(
+    
+    const rendered = renderPrompt(
       selectedTemplate.id,
-      templateVariables,
-      selectedResources,
-      promptText
-    );
-
-    const additional = await fetchAdditionalContext(
-      client,
-      selectedTemplate,
+      userGoal,
       templateVariables,
       selectedResources
     );
-
-    return rendered.prompt + "\n\n## Additional Context\n" + JSON.stringify(additional, null, 2);
+    
+    return rendered.prompt;
   }
 
   function fetchResourceData(type, id) {
@@ -149,7 +146,16 @@ export function PlanModeView({
     // Set human from profile
     request.human = profile?.id || "unknown";
 
-    // Validate actions
+    // Validate against template schema if template was used
+    if (selectedTemplate) {
+      const schemaValidation = validateResponse(selectedTemplate.id, request);
+      if (!schemaValidation.valid) {
+        setParseError(`Schema validation failed: ${schemaValidation.errors.join(", ")}`);
+        return;
+      }
+    }
+
+    // Validate action payloads
     const validation = validateRequestActions(request);
     if (!validation.valid) {
       setParseError(`Action validation failed: ${JSON.stringify(validation.errors)}`);
@@ -265,47 +271,85 @@ export function PlanModeView({
             </select>
           </div>
 
-          {/* Template Variables */}
-          {selectedTemplate?.variables?.length > 0 && (
-            <div style={{ marginBottom: 12, padding: 8, background: T.bg2, borderRadius: 4 }}>
-              {selectedTemplate.variables.map((v) => (
-                <div key={v.name} style={{ marginBottom: 8 }}>
-                  <label style={{ display: "block", fontSize: 12, color: T.dim, marginBottom: 4 }}>
-                    {v.label}
-                  </label>
-                  {v.type === "boolean" ? (
-                    <input
-                      type="checkbox"
-                      checked={templateVariables[v.name] || false}
-                      onChange={(e) => handleVariableChange(v.name, e.target.checked)}
-                    />
-                  ) : v.type === "select" ? (
-                    <select
-                      value={templateVariables[v.name] || v.default || ""}
-                      onChange={(e) => handleVariableChange(v.name, e.target.value)}
-                      style={{ width: "100%", padding: 4, background: T.bg, color: T.fg }}
-                    >
-                      {v.options.map((o) => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
-                    </select>
-                  ) : v.type === "number" ? (
-                    <input
-                      type="number"
-                      value={templateVariables[v.name] || v.default || 0}
-                      onChange={(e) => handleVariableChange(v.name, parseInt(e.target.value))}
-                      style={{ width: "100%", padding: 4, background: T.bg, color: T.fg }}
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={templateVariables[v.name] || ""}
-                      onChange={(e) => handleVariableChange(v.name, e.target.value)}
-                      style={{ width: "100%", padding: 4, background: T.bg, color: T.fg }}
-                    />
+          {/* Template Detail Toggle */}
+          {selectedTemplate && (
+            <div style={{ marginBottom: 12 }}>
+              <button
+                onClick={() => setShowTemplateDetail(!showTemplateDetail)}
+                style={{
+                  background: "none", border: "none", color: T.amber,
+                  cursor: "pointer", fontSize: 12, padding: 0, marginBottom: 8
+                }}
+              >
+                {showTemplateDetail ? "▼" : "▶"} Template Details
+              </button>
+              
+              {showTemplateDetail && (
+                <div style={{ 
+                  padding: 12, background: T.bg2, borderRadius: 4, 
+                  fontSize: 11, maxHeight: 300, overflow: "auto" 
+                }}>
+                  {/* Description */}
+                  <div style={{ marginBottom: 12, color: T.dim }}>
+                    {selectedTemplate.description}
+                  </div>
+                  
+                  {/* Schema */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Output Schema</div>
+                    <pre style={{ 
+                      fontSize: 10, fontFamily: "'JetBrains Mono'", 
+                      background: T.bg, padding: 8, borderRadius: 4,
+                      overflow: "auto", maxHeight: 150 
+                    }}>
+                      {JSON.stringify(selectedTemplate.outputSchema, null, 2)}
+                    </pre>
+                  </div>
+                  
+                  {/* Instructions */}
+                  {selectedTemplate.instructions && (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Instructions</div>
+                      <pre style={{ 
+                        fontSize: 10, fontFamily: "'JetBrains Mono'",
+                        background: T.bg, padding: 8, borderRadius: 4,
+                        whiteSpace: "pre-wrap" 
+                      }}>
+                        {selectedTemplate.instructions}
+                      </pre>
+                    </div>
+                  )}
+                  
+                  {/* Example */}
+                  {selectedTemplate.example && (
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Example</div>
+                      <pre style={{ 
+                        fontSize: 10, fontFamily: "'JetBrains Mono'",
+                        background: T.bg, padding: 8, borderRadius: 4,
+                        overflow: "auto", maxHeight: 100
+                      }}>
+                        {selectedTemplate.example}
+                      </pre>
+                    </div>
                   )}
                 </div>
-              ))}
+              )}
+            </div>
+          )}
+
+          {/* User Goal */}
+          {selectedTemplate && (
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 12, color: T.dim, marginBottom: 4 }}>
+                {selectedTemplate.goal || "Your goal"}
+              </label>
+              <textarea
+                value={userGoal}
+                onChange={(e) => setUserGoal(e.target.value)}
+                placeholder={selectedTemplate.goal || "Describe what you want..."}
+                style={{ ...inputStyle, minHeight: 60, width: "100%" }}
+              />
             </div>
           )}
 

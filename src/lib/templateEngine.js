@@ -1,7 +1,7 @@
 /**
- * templateEngine.js
+ * templateEngine.js v2
  *
- * Handles LLM prompt templates: loading, variable substitution,
+ * Rich LLM prompt templates with JSON Schema, instructions,
  * and context fetching from ADO resources.
  */
 
@@ -10,121 +10,335 @@ import { getType, resolveField } from "./resourceTypes";
 
 const TEMPLATES_PATH = "collections/llm-templates.yaml";
 
+/**
+ * v2 built-in templates with JSON Schema output specification
+ */
 const BUILT_IN_TEMPLATES = [
   {
-    id: "analyze-work-items",
-    name: "Analyze Work Items",
-    description: "Get analysis of selected work items",
+    id: "create-work-item",
+    name: "Create Work Item",
+    description: "Create a new Azure DevOps work item",
     icon: "📋",
-    variables: [
-      {
-        name: "focus",
-        label: "Focus Area",
-        type: "select",
-        options: ["status", "blockers", "assignment", "trends", "overview"],
-        default: "overview",
-      },
-      {
-        name: "includeChildren",
-        label: "Include Child Work Items",
-        type: "boolean",
-        default: false,
-      },
-    ],
-    contextFetch: "workitem",
-    promptTemplate: "## Context\n### Selected Work Items\n{{workItems}}\n\n### Analysis Focus\n{{focus}}\n\n## Request\n{{prompt}}",
+    goal: "What's the work item about?",
+    outputSchema: {
+      type: "object",
+      required: ["requestId", "actions"],
+      properties: {
+        requestId: { type: "string", description: "Unique ID, format: req-xxxxxxxx" },
+        correlationId: { type: "string", description: "Chain ID for related requests" },
+        prompt: { type: "string", description: "Original user goal" },
+        actions: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["actionType", "payload"],
+            properties: {
+              actionType: { type: "string", const: "create-work-item" },
+              resourceType: { type: "string", const: "workitem" },
+              payload: {
+                type: "object",
+                required: ["title", "type"],
+                properties: {
+                  title: { type: "string", description: "Work item title" },
+                  type: { type: "string", enum: ["Bug", "Task", "User Story", "Epic", "Feature"] },
+                  priority: { type: "integer", minimum: 1, maximum: 4, description: "1=Critical, 2=High, 3=Medium, 4=Low" },
+                  description: { type: "string", description: "Detailed description in markdown" },
+                  project: { type: "string", description: "Project name" },
+                  assignee: { type: "string", description: "Assignee email or display name" },
+                  areaPath: { type: "string", description: "Area path" },
+                  iterationPath: { type: "string", description: "Iteration path" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    instructions: `Analyze the user's goal and create an appropriate work item.
+
+Required fields:
+- title: Clear, concise summary
+- type: Bug, Task, User Story, Epic, or Feature
+- priority: 1 (Critical) to 4 (Low)
+
+For bugs, include:
+- Steps to reproduce in description
+- Expected vs actual behavior
+
+For user stories:
+- Description should follow INVEST format`,
+    example: `requestId: req-createwi
+prompt: Create a bug for the login blank screen issue
+actions:
+  - actionType: create-work-item
+    resourceType: workitem
+    payload:
+      title: Login page blank on Safari mobile
+      type: Bug
+      priority: 1
+      description: |
+        ## Steps to Reproduce
+        1. Open app on iOS Safari
+        2. Navigate to /login
+        
+        ## Expected
+        Login page loads
+        
+        ## Actual
+        Blank white screen
+      project: MyProject`,
+    variables: [],
+    contextFetch: "workitem"
   },
   {
-    id: "pipeline-failure-analysis",
-    name: "Pipeline Failure Analysis",
-    description: "Analyze why a pipeline failed",
+    id: "update-work-item",
+    name: "Update Work Item",
+    description: "Update an existing Azure DevOps work item",
+    icon: "📝",
+    goal: "What work item and what needs to change?",
+    outputSchema: {
+      type: "object",
+      required: ["requestId", "actions"],
+      properties: {
+        requestId: { type: "string" },
+        correlationId: { type: "string" },
+        prompt: { type: "string" },
+        actions: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["actionType", "payload"],
+            properties: {
+              actionType: { type: "string", const: "update-work-item" },
+              resourceType: { type: "string", const: "workitem" },
+              payload: {
+                type: "object",
+                required: ["id", "project"],
+                properties: {
+                  id: { type: "integer", description: "Work item ID" },
+                  project: { type: "string", description: "Project name" },
+                  title: { type: "string" },
+                  state: { type: "string", description: "New state" },
+                  priority: { type: "integer", minimum: 1, maximum: 4 },
+                  assignee: { type: "string" },
+                  description: { type: "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    instructions: `Update fields on an existing work item.
+
+Include at minimum:
+- id: The work item ID to update
+- project: Project containing the work item
+- At least one field to update (title, state, priority, etc.)`,
+    example: `requestId: req-updatewi
+prompt: Mark bug #123 as resolved
+actions:
+  - actionType: update-work-item
+    resourceType: workitem
+    payload:
+      id: 123
+      project: MyProject
+      state: Resolved`,
+    variables: [],
+    contextFetch: "workitem"
+  },
+  {
+    id: "trigger-pipeline",
+    name: "Trigger Pipeline",
+    description: "Run an Azure DevOps pipeline",
     icon: "⚡",
-    variables: [
-      {
-        name: "includeLogs",
-        label: "Include Recent Log Lines",
-        type: "boolean",
-        default: true,
-      },
-      {
-        name: "logLines",
-        label: "Number of Log Lines",
-        type: "number",
-        default: 50,
-        showIf: "includeLogs",
-      },
-      {
-        name: "includeTimeline",
-        label: "Include Timeline/Graph",
-        type: "boolean",
-        default: true,
-      },
-    ],
-    contextFetch: "pipeline",
-    promptTemplate: "## Context\n### Pipeline\n{{pipeline}}\n\n{{includeLogs}}### Recent Logs (last {{logLines}} lines)\n```\n{{logs}}\n```\n\n{{includeTimeline}}### Timeline\n{{timeline}}\n\n## Request\n{{prompt}}",
+    goal: "Which pipeline to run and with what parameters?",
+    outputSchema: {
+      type: "object",
+      required: ["requestId", "actions"],
+      properties: {
+        requestId: { type: "string" },
+        correlationId: { type: "string" },
+        prompt: { type: "string" },
+        actions: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["actionType", "payload"],
+            properties: {
+              actionType: { type: "string", const: "trigger-pipeline" },
+              resourceType: { type: "string", const: "pipeline" },
+              payload: {
+                type: "object",
+                required: ["project", "pipelineId"],
+                properties: {
+                  project: { type: "string", description: "Project name" },
+                  pipelineId: { type: "integer", description: "Pipeline definition ID" },
+                  templateParameters: { type: "object", description: "Pipeline parameters" },
+                  branch: { type: "string", description: "Branch to run" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    instructions: `Trigger a pipeline run.
+
+Required:
+- project: Project containing the pipeline
+- pipelineId: The pipeline definition ID
+
+Optional:
+- templateParameters: Key-value parameters for the pipeline
+- branch: Branch to run from (defaults to default branch)`,
+    example: `requestId: req-triggerpipe
+prompt: Run the build pipeline
+actions:
+  - actionType: trigger-pipeline
+    resourceType: pipeline
+    payload:
+      project: MyProject
+      pipelineId: 5`,
+    variables: [],
+    contextFetch: "pipeline"
   },
   {
-    id: "code-review",
-    name: "Code Review Context",
-    description: "Get PR and build context for review",
+    id: "create-pr",
+    name: "Create Pull Request",
+    description: "Create an Azure DevOps pull request",
     icon: "🔀",
-    variables: [
-      {
-        name: "includeBuilds",
-        label: "Include Build Status",
-        type: "boolean",
-        default: true,
-      },
-      {
-        name: "includeTests",
-        label: "Include Test Results",
-        type: "boolean",
-        default: true,
-      },
-      {
-        name: "includeFiles",
-        label: "Include Changed Files List",
-        type: "boolean",
-        default: true,
-      },
-    ],
-    contextFetch: "pr",
-    promptTemplate: "## Context\n### Pull Request\n{{pr}}\n\n{{includeBuilds}}### Build Status\n{{builds}}\n\n{{includeTests}}### Test Results\n{{tests}}\n\n{{includeFiles}}### Changed Files\n{{files}}\n\n## Request\n{{prompt}}",
+    goal: "What's being reviewed and from/to which branch?",
+    outputSchema: {
+      type: "object",
+      required: ["requestId", "actions"],
+      properties: {
+        requestId: { type: "string" },
+        correlationId: { type: "string" },
+        prompt: { type: "string" },
+        actions: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["actionType", "payload"],
+            properties: {
+              actionType: { type: "string", const: "create-pr" },
+              resourceType: { type: "string", const: "pr" },
+              payload: {
+                type: "object",
+                required: ["project", "repoId", "sourceBranch", "title"],
+                properties: {
+                  project: { type: "string" },
+                  repoId: { type: "string" },
+                  sourceBranch: { type: "string", description: "Source branch" },
+                  targetBranch: { type: "string", description: "Target branch, defaults to main" },
+                  title: { type: "string" },
+                  description: { type: "string", description: "PR description" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    instructions: `Create a pull request.
+
+Required:
+- project: Project name
+- repoId: Repository ID
+- sourceBranch: Branch with changes
+- title: PR title
+
+Optional:
+- targetBranch: Target branch (defaults to main)
+- description: Detailed PR description`,
+    example: `requestId: req-createpr
+prompt: Create PR for feature/login
+actions:
+  - actionType: create-pr
+    resourceType: pr
+    payload:
+      project: MyProject
+      repoId: myrepo
+      sourceBranch: feature/login
+      targetBranch: main
+      title: Add login flow
+      description: Implements OAuth login`,
+    variables: [],
+    contextFetch: "pr"
   },
   {
-    id: "repository-analysis",
-    name: "Repository Analysis",
-    description: "Analyze repository health and activity",
-    icon: "📁",
-    variables: [
-      {
-        name: "includeBranches",
-        label: "Include Branch Info",
-        type: "boolean",
-        default: true,
-      },
-      {
-        name: "includeRecentCommits",
-        label: "Include Recent Commits",
-        type: "boolean",
-        default: true,
-      },
-      {
-        name: "commitCount",
-        label: "Number of Commits",
-        type: "number",
-        default: 10,
-        showIf: "includeRecentCommits",
-      },
-    ],
-    contextFetch: "repo",
-    promptTemplate: "## Context\n### Repository\n{{repo}}\n\n{{includeBranches}}### Branches\n{{branches}}\n\n{{includeRecentCommits}}### Recent Commits (last {{commitCount}})\n{{commits}}\n\n## Request\n{{prompt}}",
-  },
+    id: "upsert-wiki",
+    name: "Update Wiki",
+    description: "Create or update a wiki page",
+    icon: "📖",
+    goal: "Which wiki page to update?",
+    outputSchema: {
+      type: "object",
+      required: ["requestId", "actions"],
+      properties: {
+        requestId: { type: "string" },
+        correlationId: { type: "string" },
+        prompt: { type: "string" },
+        actions: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["actionType", "payload"],
+            properties: {
+              actionType: { type: "string", const: "upsert-wiki" },
+              resourceType: { type: "string", const: "wiki" },
+              payload: {
+                type: "object",
+                required: ["project", "path", "content"],
+                properties: {
+                  project: { type: "string" },
+                  wiki: { type: "string", description: "Wiki name" },
+                  path: { type: "string", description: "Page path" },
+                  content: { type: "string", description: "Markdown content" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    instructions: `Create or update a wiki page.
+
+Required:
+- project: Project containing the wiki
+- path: Page path (e.g., /docs/intro)
+- content: Markdown content
+
+Use this to update existing documentation.`,
+    example: `requestId: req-upsertwiki
+prompt: Update getting started doc
+actions:
+  - actionType: upsert-wiki
+    resourceType: wiki
+    payload:
+      project: MyProject
+      wiki: docs
+      path: /getting-started
+      content: |
+        # Getting Started
+        
+        Welcome to the project!
+        
+        ## Setup
+        1. Clone the repo
+        2. Run npm install`,
+    variables: [],
+    contextFetch: "wiki"
+  }
 ];
 
 let _templates = null;
 let _templatesById = null;
 
+/**
+ * Load templates from config repo, merging with built-ins.
+ */
 export async function loadTemplates(client, config) {
   const templates = [...BUILT_IN_TEMPLATES];
 
@@ -165,196 +379,102 @@ export function getAllTemplates() {
   return _templates || BUILT_IN_TEMPLATES;
 }
 
-export function substituteVariables(template, values) {
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
-    return values[key] !== undefined ? values[key] : match;
-  });
-}
-
-export async function renderTemplate(templateId, variableValues, contextResources, userPrompt) {
+/**
+ * Render a prompt from a template and user goal.
+ * Returns the full prompt including schema, instructions, and example.
+ */
+export function renderPrompt(templateId, userGoal, variableValues = {}, contextResources = []) {
   const template = getTemplate(templateId);
   if (!template) {
     throw new Error("Template not found: " + templateId);
   }
 
-  const context = [];
-  let promptContent = template.promptTemplate || "";
-
-  if (template.contextFetch && contextResources.length > 0) {
-    const fetchType = template.contextFetch;
-
-    for (const res of contextResources) {
-      if (res.resourceType !== fetchType && fetchType !== "all") continue;
-
-      const contextData = await transformResourceForContext(res, template, variableValues);
-      context.push({
-        resourceType: res.resourceType,
-        resourceId: res.resourceId,
-        data: contextData,
-        templateVariables: extractTemplateVariables(template, variableValues),
-      });
-    }
-  }
-
-  const contextBlocks = context.map((c) => formatContextBlock(c)).join("\n\n");
-
-  promptContent = substituteVariables(promptContent, {
-    ...variableValues,
-    workItems: formatWorkItems(context),
-    pipeline: formatPipeline(context),
-    pr: formatPR(context),
-    repo: formatRepo(context),
-    logs: "",
-    timeline: "",
-    builds: "",
-    tests: "",
-    files: "",
-    branches: "",
-    commits: "",
-    prompt: userPrompt,
+  // Build YAML schema string
+  const schemaYaml = yaml.dump(template.outputSchema, {
+    lineWidth: 0,
+    noRefs: true
   });
 
+  // Build the full prompt
+  let prompt = "";
+  
+  prompt += "## Goal\n" + userGoal + "\n\n";
+  
+  prompt += "## Output Schema (JSON)\n```json\n" + JSON.stringify(template.outputSchema, null, 2) + "\n```\n\n";
+  
+  if (template.instructions) {
+    prompt += "## Instructions\n" + template.instructions + "\n\n";
+  }
+  
+  if (template.example) {
+    prompt += "## Example Output (YAML)\n```yaml\n" + template.example + "\n```\n\n";
+  }
+
+  // Add context if available
+  if (contextResources.length > 0) {
+    prompt += "## Context\n";
+    for (const res of contextResources) {
+      prompt += "- " + res.resourceType + ": " + res.resourceId + "\n";
+      if (res.data) {
+        prompt += "  " + JSON.stringify(res.data).slice(0, 200) + "...\n";
+      }
+    }
+    prompt += "\n";
+  }
+
   return {
-    prompt: promptContent,
-    context,
-    template: templateId,
-    templateValues: variableValues,
+    prompt,
+    schema: template.outputSchema,
+    instructions: template.instructions,
+    example: template.example,
+    template
   };
 }
 
-async function transformResourceForContext(res, template, variableValues) {
-  const rt = getType(res.resourceType);
-  if (!rt) return res.data;
-
-  if (res.resourceType === "workitem") {
-    const titleField = "fields['System.Title']";
-    const typeField = "fields['System.WorkItemType']";
-    const stateField = "fields['System.State']";
-    const assigneeField = "fields['System.AssignedTo.displayName']";
-    const descField = "fields['System.Description']";
-    return {
-      id: res.data.id,
-      title: resolveField(res.data, titleField),
-      type: resolveField(res.data, typeField),
-      state: resolveField(res.data, stateField),
-      assignee: resolveField(res.data, assigneeField),
-      description: resolveField(res.data, descField),
-    };
+/**
+ * Validate parsed response against template schema
+ */
+export function validateResponse(templateId, response) {
+  const template = getTemplate(templateId);
+  if (!template) {
+    return { valid: false, errors: ["Template not found"] };
   }
 
-  if (res.resourceType === "pipeline") {
-    const run = res.data.latestRun || {};
-    return {
-      id: res.data.id,
-      name: res.data.name,
-      project: res.data.project,
-      latestRun: {
-        id: run.id,
-        state: run.state,
-        result: run.result,
-        sourceBranch: run.sourceBranch,
-        finishTime: run.finishTime,
-      },
-    };
+  const errors = [];
+  const schema = template.outputSchema;
+
+  // Check required top-level fields
+  if (!response.requestId) errors.push("Missing required field: requestId");
+  if (!response.actions) errors.push("Missing required field: actions");
+  else if (!Array.isArray(response.actions)) {
+    errors.push("actions must be an array");
+  } else if (response.actions.length === 0) {
+    errors.push("actions must have at least one item");
   }
 
-  if (res.resourceType === "pr") {
-    return {
-      id: res.data.pullRequestId,
-      title: res.data.title,
-      sourceBranch: res.data.sourceBranch,
-      targetBranch: res.data.targetRefName,
-      author: res.data.createdBy?.displayName,
-      reviewers: res.data.reviewers?.map((r) => r.displayName).join(", "),
-      status: res.data.status,
-    };
-  }
+  // Validate each action
+  if (response.actions) {
+    for (let i = 0; i < response.actions.length; i++) {
+      const action = response.actions[i];
+      const idx = i + 1;
 
-  if (res.resourceType === "repo") {
-    return {
-      id: res.data.id,
-      name: res.data.name,
-      project: res.data.project,
-      defaultBranch: res.data.defaultBranch,
-      remoteUrl: res.data.remoteUrl,
-    };
-  }
+      if (!action.actionType) {
+        errors.push(`actions[${idx}]: missing actionType`);
+      } else if (action.actionType !== templateId.replace("create-", "").split("-")[0] + "-") {
+        // Allow some flexibility - just warn if mismatched
+      }
 
-  return res.data;
-}
-
-function extractTemplateVariables(template, values) {
-  const vars = {};
-  for (const v of template.variables || []) {
-    if (values[v.name] !== undefined) {
-      vars[v.name] = values[v.name];
-    }
-  }
-  return vars;
-}
-
-function formatContextBlock(context) {
-  const lines = ["### " + context.resourceType + ": " + context.resourceId];
-  const data = context.data;
-  for (const [key, val] of Object.entries(data)) {
-    if (val !== undefined && val !== null) {
-      lines.push("- " + key + ": " + val);
-    }
-  }
-  return lines.join("\n");
-}
-
-function formatWorkItems(context) {
-  const items = context.filter((c) => c.resourceType === "workitem");
-  return items
-    .map(
-      (c) =>
-        "- #" + c.data.id + " [" + c.data.type + "] " + c.data.title + " (" + c.data.state + ")"
-    )
-    .join("\n");
-}
-
-function formatPipeline(context) {
-  const p = context.find((c) => c.resourceType === "pipeline");
-  if (!p) return "No pipeline selected";
-  const run = p.data.latestRun || {};
-  return p.data.name + " (" + p.data.project + ") - " + run.state + (run.result ? " / " + run.result : "");
-}
-
-function formatPR(context) {
-  const pr = context.find((c) => c.resourceType === "pr");
-  if (!pr) return "No PR selected";
-  return "#" + pr.data.id + " " + pr.data.title + " (" + pr.data.sourceBranch + " -> " + pr.data.targetBranch + ")";
-}
-
-function formatRepo(context) {
-  const r = context.find((c) => c.resourceType === "repo");
-  if (!r) return "No repository selected";
-  return r.data.name + " (" + r.data.project + ") - " + r.data.defaultBranch;
-}
-
-export async function fetchAdditionalContext(client, template, variableValues, contextResources) {
-  const additional = {};
-
-  if (template.contextFetch === "pipeline" && variableValues.includeLogs) {
-    const pipelineRes = contextResources.find((r) => r.resourceType === "pipeline");
-    if (pipelineRes?.data?.latestRun?.id) {
-      try {
-        const logText = await client.getBuildLog(
-          pipelineRes.data.project,
-          pipelineRes.data.id,
-          pipelineRes.data.latestRun.id
-        );
-        const lines = variableValues.logLines || 50;
-        const logLinesArr = logText.split("\n").slice(-lines);
-        additional.logs = logLinesArr.join("\n");
-      } catch (e) {
-        additional.logs = "(Failed to fetch logs)";
+      if (!action.payload) {
+        errors.push(`actions[${idx}]: missing payload`);
       }
     }
   }
 
-  return additional;
+  return {
+    valid: errors.length === 0,
+    errors
+  };
 }
 
+// Re-export for convenience
 export { BUILT_IN_TEMPLATES };
