@@ -8,6 +8,7 @@ const CACHE_TTL = 5 * 60 * 1000;
 const RUNS_TTL = 60 * 1000; // 1 minute for latest pipeline runs
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000]; // 1s, 2s, 4s with jitter
+const SETTINGS_KEY = "ado-superui-worker-settings";
 
 class BackgroundWorker {
   constructor() {
@@ -25,6 +26,14 @@ class BackgroundWorker {
     this.lastPipelineRunsRefresh = null;
     this.listeners = new Set();
     this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
+    
+    // Settings with localStorage persistence
+    this.settings = {
+      enabled: false,
+      mode: "scoped", // "all" | "scoped" | "specific"
+      specificProjects: new Set(),
+    };
+    this._loadSettings();
     
     // Request queue and state
     this._requestQueue = [];
@@ -49,6 +58,67 @@ class BackgroundWorker {
     for (const name of Object.keys(this.projectStatus)) {
       this.projectStatus[name].scoped = names.has(name);
     }
+  }
+
+  _loadSettings() {
+    try {
+      const stored = localStorage.getItem(SETTINGS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        this.settings = {
+          enabled: parsed.enabled ?? false,
+          mode: parsed.mode || "scoped",
+          specificProjects: new Set(parsed.specificProjects || []),
+        };
+        this.log(`Settings loaded: enabled=${this.settings.enabled}, mode=${this.settings.mode}, specificCount=${this.settings.specificProjects.size}`);
+      }
+    } catch (e) {
+      this.log(`Failed to load settings: ${e.message}`);
+    }
+  }
+
+  _saveSettings() {
+    try {
+      const toSave = {
+        enabled: this.settings.enabled,
+        mode: this.settings.mode,
+        specificProjects: [...this.settings.specificProjects],
+      };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(toSave));
+    } catch (e) {
+      this.log(`Failed to save settings: ${e.message}`);
+    }
+  }
+
+  setSettings(newSettings) {
+    const prevEnabled = this.settings.enabled;
+    this.settings = {
+      ...this.settings,
+      ...newSettings,
+      specificProjects: newSettings.specificProjects instanceof Set
+        ? newSettings.specificProjects
+        : new Set(newSettings.specificProjects || []),
+    };
+    this._saveSettings();
+    this.log(`Settings updated: enabled=${this.settings.enabled}, mode=${this.settings.mode}, specificCount=${this.settings.specificProjects.size}`);
+    
+    if (!prevEnabled && this.settings.enabled && this.isRunning) {
+      this.tick();
+    }
+    
+    if (prevEnabled && !this.settings.enabled) {
+      this.log("Background refresh disabled - stopping tick");
+    }
+    
+    this.notify();
+  }
+
+  getSettings() {
+    return {
+      enabled: this.settings.enabled,
+      mode: this.settings.mode,
+      specificProjects: new Set(this.settings.specificProjects),
+    };
   }
 
   _getProjectStatus(projectName) {
@@ -259,6 +329,7 @@ class BackgroundWorker {
       scopedProjectNames: this.scopedProjectNames,
       inFlight: inFlightList,
       requestQueue: queueList,
+      settings: this.getSettings(),
     };
   }
 
@@ -739,11 +810,25 @@ class BackgroundWorker {
   getBatch() {
     if (!this.projects.length) return [];
 
-    const scoped = this.projects.filter(p => this.scopedProjectNames.has(p.name));
-    const nonScoped = this.projects.filter(p => !this.scopedProjectNames.has(p.name));
+    let eligibleProjects;
+    const mode = this.settings.mode;
+    const specificSet = this.settings.specificProjects;
+
+    if (mode === "all") {
+      eligibleProjects = this.projects;
+    } else if (mode === "scoped") {
+      eligibleProjects = this.projects.filter(p => this.scopedProjectNames.has(p.name));
+    } else if (mode === "specific") {
+      eligibleProjects = this.projects.filter(p => specificSet.has(p.name));
+    } else {
+      eligibleProjects = this.projects.filter(p => this.scopedProjectNames.has(p.name));
+    }
+
+    const scoped = eligibleProjects.filter(p => this.scopedProjectNames.has(p.name));
+    const nonScoped = eligibleProjects.filter(p => !this.scopedProjectNames.has(p.name));
 
     const batch = [];
-    const count = Math.min(BATCH_SIZE, this.projects.length);
+    const count = Math.min(BATCH_SIZE, eligibleProjects.length);
 
     // Scoped projects always refreshed first
     for (const p of scoped) {
@@ -765,13 +850,21 @@ class BackgroundWorker {
   }
 
   async tick() {
+    if (!this.settings.enabled) {
+      this.log("Tick skipped - background refresh disabled");
+      return;
+    }
+
     if (!this.client || !this.projects.length) {
       await this.loadProjects();
       return;
     }
 
     const batch = this.getBatch();
-    if (!batch.length) return;
+    if (!batch.length) {
+      this.log("Tick skipped - no projects in batch");
+      return;
+    }
 
     const projectNames = batch.map(p => p.name).join(", ");
     this.log(`Refreshing ${batch.length} projects: ${projectNames}`);

@@ -133,10 +133,14 @@ function RequestSection({ title, requests, isInFlight }) {
   );
 }
 
-function ProjectRow({ name, status }) {
+function ProjectRow({ name, status, settings, onProjectToggle }) {
   const [expanded, setExpanded] = useState(false);
   const resources = status.resources || {};
   const hasError = Object.values(resources).some(r => r.status === "error");
+  const isSpecificMode = settings.mode === "specific";
+  const isSelected = settings.specificProjects instanceof Set 
+    ? settings.specificProjects.has(name) 
+    : false;
 
   return (
     <div style={{ borderBottom: `1px solid ${T.border}` }}>
@@ -150,6 +154,18 @@ function ProjectRow({ name, status }) {
         onMouseEnter={e => { if (hasError) e.currentTarget.style.background = "rgba(255,255,255,0.02)"; }}
         onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
       >
+        {isSpecificMode && (
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={e => {
+              e.stopPropagation();
+              onProjectToggle(name, e.target.checked);
+            }}
+            onClick={e => e.stopPropagation()}
+            style={{ accentColor: T.cyan, cursor: "pointer" }}
+          />
+        )}
         <span style={{ width: 160, flexShrink: 0, color: T.heading, fontFamily: "'Barlow'", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {name}
         </span>
@@ -212,6 +228,11 @@ export function WorkerStatusView({ collections }) {
     scopedProjectNames: new Set(),
     inFlight: [],
     requestQueue: [],
+    settings: {
+      enabled: false,
+      mode: "scoped",
+      specificProjects: new Set(),
+    },
   });
 
   useEffect(() => {
@@ -226,7 +247,7 @@ export function WorkerStatusView({ collections }) {
   const { 
     projectStatus, isRunning, isLeader, lastRefresh, 
     activityLog, projects, scopedProjectNames, 
-    inFlight, requestQueue 
+    inFlight, requestQueue, settings 
   } = state;
 
   const EMPTY_RESOURCES = {
@@ -262,6 +283,30 @@ export function WorkerStatusView({ collections }) {
     Object.values(s.resources || {}).some(r => r.status === "error")
   ).length;
 
+  const handleSettingChange = (key, value) => {
+    const newSettings = { ...settings, [key]: value };
+    if (key === "mode" && value !== "specific") {
+      newSettings.specificProjects = new Set();
+    }
+    backgroundWorker.setSettings(newSettings);
+  };
+
+  const handleProjectToggle = (projectName, checked) => {
+    const newSet = new Set(settings.specificProjects);
+    if (checked) {
+      newSet.add(projectName);
+    } else {
+      newSet.delete(projectName);
+    }
+    backgroundWorker.setSettings({ ...settings, specificProjects: newSet });
+  };
+
+  const modeOptions = [
+    { value: "all", label: "All projects" },
+    { value: "scoped", label: "Collection projects only" },
+    { value: "specific", label: "Specific projects" },
+  ];
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ padding: "14px 16px", borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
@@ -276,6 +321,45 @@ export function WorkerStatusView({ collections }) {
             {isRunning ? "running" : isLeader ? "stopped" : "syncing in other tab"}
           </span>
         </div>
+        
+        {/* Settings Controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 11, color: T.text }}>
+            <input
+              type="checkbox"
+              checked={settings.enabled}
+              onChange={e => handleSettingChange("enabled", e.target.checked)}
+              style={{ accentColor: T.cyan }}
+            />
+            Enable background refresh
+          </label>
+          
+          <select
+            value={settings.mode}
+            onChange={e => handleSettingChange("mode", e.target.value)}
+            style={{
+              background: `${T.dimmer}10`,
+              border: `1px solid ${T.border}`,
+              borderRadius: 4,
+              padding: "3px 8px",
+              fontSize: 10,
+              fontFamily: "'JetBrains Mono'",
+              color: T.text,
+              cursor: "pointer",
+            }}
+          >
+            {modeOptions.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          
+          {settings.mode === "specific" && (
+            <span style={{ fontSize: 10, color: T.dim }}>
+              {settings.specificProjects.size} selected
+            </span>
+          )}
+        </div>
+        
         <div style={{ display: "flex", gap: 20, fontSize: 10, fontFamily: "'JetBrains Mono'", color: T.dim }}>
           <span>{sorted.length} projects · {scopedCount} scoped</span>
           {errorCount > 0 && <span style={{ color: T.red }}>{errorCount} with errors</span>}
@@ -338,7 +422,7 @@ export function WorkerStatusView({ collections }) {
           </div>
         ) : (
           sorted.map(([name, status]) => (
-            <ProjectRow key={name} name={name} status={status} />
+            <ProjectRow key={name} name={name} status={status} settings={settings} onProjectToggle={handleProjectToggle} />
           ))
         )}
       </div>
